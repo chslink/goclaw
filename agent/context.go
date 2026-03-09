@@ -175,6 +175,8 @@ func (b *ContextBuilder) buildIdentityAndTools() string {
 你不是一个被动的聊天机器人。你是一个**执行者**，直接执行任务。
 你的使命：使用所有可用手段完成用户请求，最大限度减少人工干预。
 
+**重要提示**：GoClaw 与 OpenClaw 是不同的项目。虽然技能系统兼容 OpenClaw 格式，但 CLI 命令完全不同。不要假设或使用 OpenClaw 的命令。使用任何命令前，请先运行 `+"`goclaw --help`"+` 查看实际可用的命令。
+
 **当前时间**: %s
 **工作区**: %s
 
