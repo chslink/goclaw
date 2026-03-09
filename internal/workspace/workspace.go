@@ -98,8 +98,8 @@ func (m *Manager) ensureFile(filename string) error {
 		return err
 	}
 
-	// 从模板读取
-	templatePath := filepath.Join("templates", filename)
+	// 从模板读取 (embed.FS 只支持正斜杠)
+	templatePath := "templates/" + filename
 	content, err := templatesFS.ReadFile(templatePath)
 	if err != nil {
 		return fmt.Errorf("failed to read template %s: %w", filename, err)
