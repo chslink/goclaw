@@ -103,6 +103,7 @@ type ChannelsConfig struct {
 	WeWork   WeWorkChannelConfig   `mapstructure:"wework" json:"wework"`
 	Infoflow InfoflowChannelConfig `mapstructure:"infoflow" json:"infoflow"`
 	Gotify   GotifyChannelConfig   `mapstructure:"gotify" json:"gotify"`
+	Weibo    WeiboChannelConfig    `mapstructure:"weibo" json:"weibo"`
 }
 
 // ChannelAccountConfig 通道账号配置（支持多账号）
@@ -110,8 +111,8 @@ type ChannelAccountConfig struct {
 	Enabled           bool     `mapstructure:"enabled" json:"enabled"`
 	Name              string   `mapstructure:"name" json:"name"`                             // 账号显示名称
 	Token             string   `mapstructure:"token" json:"token"`                           // Telegram token
-	AppID             string   `mapstructure:"app_id" json:"app_id"`                         // QQ/Feishu/WeWork app_id
-	AppSecret         string   `mapstructure:"app_secret" json:"app_secret"`                 // QQ/Feishu app_secret
+	AppID             string   `mapstructure:"app_id" json:"app_id"`                         // QQ/Feishu/WeWork/Weibo app_id
+	AppSecret         string   `mapstructure:"app_secret" json:"app_secret"`                 // QQ/Feishu/Weibo app_secret
 	CorpID            string   `mapstructure:"corp_id" json:"corp_id"`                       // 企业微信 corp_id
 	AgentID           string   `mapstructure:"agent_id" json:"agent_id"`                     // 企业微信 agent_id
 	ClientID          string   `mapstructure:"client_id" json:"client_id"`                   // 钉钉 client_id
@@ -122,9 +123,12 @@ type ChannelAccountConfig struct {
 	EncryptKey        string   `mapstructure:"encrypt_key" json:"encrypt_key"`               // Feishu encrypt key
 	VerificationToken string   `mapstructure:"verification_token" json:"verification_token"` // Feishu verification token
 	WebhookPort       int      `mapstructure:"webhook_port" json:"webhook_port"`             // Infoflow/Feishu webhook port
-	ServerURL         string   `mapstructure:"server_url" json:"server_url"`                 // Gotify server url
+	ServerURL         string   `mapstructure:"server_url" json:"server_url"`                 // Gotify server url / Weibo ws_endpoint
 	AppToken          string   `mapstructure:"app_token" json:"app_token"`                   // Gotify app token
 	Priority          int      `mapstructure:"priority" json:"priority"`                     // Gotify message priority 1-10
+	WSEndpoint        string   `mapstructure:"ws_endpoint" json:"ws_endpoint"`               // Weibo WebSocket endpoint
+	TokenEndpoint     string   `mapstructure:"token_endpoint" json:"token_endpoint"`         // Weibo token endpoint
+	DMPolicy          string   `mapstructure:"dm_policy" json:"dm_policy"`                   // Weibo DM policy
 	AllowedIDs        []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 }
 
@@ -223,6 +227,21 @@ type GotifyChannelConfig struct {
 	AppToken   string   `mapstructure:"app_token" json:"app_token"`
 	Priority   int      `mapstructure:"priority" json:"priority"`   // 消息优先级 1-10
 	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
+	// 多账号配置（新格式）
+	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
+}
+
+// WeiboChannelConfig 微博通道配置
+type WeiboChannelConfig struct {
+	Enabled       bool     `mapstructure:"enabled" json:"enabled"`
+	AppID         string   `mapstructure:"app_id" json:"app_id"`                     // 微博 App ID
+	AppSecret     string   `mapstructure:"app_secret" json:"app_secret"`             // 微博 App Secret
+	WSEndpoint    string   `mapstructure:"ws_endpoint" json:"ws_endpoint"`           // WebSocket 服务地址
+	TokenEndpoint string   `mapstructure:"token_endpoint" json:"token_endpoint"`     // Token 服务地址
+	DMPolicy      string   `mapstructure:"dm_policy" json:"dm_policy"`               // 私信策略: open, pairing, closed
+	AllowFrom     []string `mapstructure:"allow_from" json:"allow_from"`             // 允许发送私信的用户 ID 列表
+	TextChunkLimit int     `mapstructure:"text_chunk_limit" json:"text_chunk_limit"` // 单条消息最大字符数
+	ChunkMode     string   `mapstructure:"chunk_mode" json:"chunk_mode"`             // 分片模式: length, newline, raw
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }

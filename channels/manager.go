@@ -681,6 +681,67 @@ func (m *Manager) SetupFromConfig(cfg *config.Config) error {
 		}
 	}
 
+	// Weibo 通道
+	if cfg.Channels.Weibo.Enabled {
+		if len(cfg.Channels.Weibo.Accounts) > 0 {
+			// 多账号配置
+			for accountID, accountCfg := range cfg.Channels.Weibo.Accounts {
+				if accountCfg.Enabled && accountCfg.AppID != "" {
+					wsEndpoint := accountCfg.WSEndpoint
+					if wsEndpoint == "" {
+						wsEndpoint = accountCfg.ServerURL
+					}
+					tokenEndpoint := accountCfg.TokenEndpoint
+					if tokenEndpoint == "" {
+						tokenEndpoint = accountCfg.WebhookURL
+					}
+					dmPolicy := accountCfg.DMPolicy
+					if dmPolicy == "" {
+						dmPolicy = "open"
+					}
+
+					wbCfg := config.WeiboChannelConfig{
+						Enabled:       accountCfg.Enabled,
+						AppID:         accountCfg.AppID,
+						AppSecret:     accountCfg.AppSecret,
+						WSEndpoint:    wsEndpoint,
+						TokenEndpoint: tokenEndpoint,
+						DMPolicy:      dmPolicy,
+						AllowFrom:     accountCfg.AllowedIDs,
+					}
+
+					channel, err := NewWeiboChannel(accountID, wbCfg, m.bus)
+					if err != nil {
+						logger.Error("Failed to create Weibo channel",
+							zap.String("account_id", accountID),
+							zap.Error(err))
+					} else {
+						channelName := buildChannelName("weibo", accountID)
+						if err := m.RegisterWithName(channel, channelName); err != nil {
+							logger.Error("Failed to register Weibo channel",
+								zap.String("account_id", accountID),
+								zap.Error(err))
+						} else {
+							logger.Info("Weibo channel registered",
+								zap.String("account_id", accountID),
+								zap.String("name", channelName))
+						}
+					}
+				}
+			}
+		} else if cfg.Channels.Weibo.AppID != "" {
+			// 单账号配置（向后兼容）
+			channel, err := NewWeiboChannel("default", cfg.Channels.Weibo, m.bus)
+			if err != nil {
+				logger.Error("Failed to create Weibo channel", zap.Error(err))
+			} else {
+				if err := m.Register(channel); err != nil {
+					logger.Error("Failed to register Weibo channel", zap.Error(err))
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

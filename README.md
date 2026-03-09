@@ -11,7 +11,7 @@ Go 语言版本的 OpenClaw - 一个功能强大的 AI Agent 框架。
 - 🛠️ **完整的工具系统**：FileSystem、Shell、Web、Browser，支持 Docker 沙箱与权限控制
 - 📚 **技能系统 (Skills)**：兼容 [OpenClaw](https://github.com/openclaw/openclaw) 和 [AgentSkills](https://agentskills.io) 规范，支持自动发现与环境准入控制 (Gating)
 - 💾 **持久化会话**：基于 JSONL 的会话存储，支持完整的工具调用链 (Tool Calls) 记录与恢复
-- 📢 **多渠道支持**：Telegram、WhatsApp、飞书 (Feishu)、QQ、企业微信 (WeWork)、钉钉 (DingTalk)、百度如流 (Infoflow)、Gotify、Slack、Discord、Google Chat、Microsoft Teams
+- 📢 **多渠道支持**：Telegram、WhatsApp、飞书 (Feishu)、QQ、企业微信 (WeWork)、钉钉 (DingTalk)、百度如流 (Infoflow)、Gotify、Slack、Discord、Google Chat、Microsoft Teams、微博 (Weibo)
 - 🔧 **灵活配置**：支持 YAML/JSON 配置，热加载，环境变量支持
 - 🎯 **多 LLM 提供商**：OpenAI (兼容接口)、Anthropic、OpenRouter，支持故障转移
 - 🌐 **WebSocket Gateway**：内置网关服务，支持实时通信
@@ -110,7 +110,8 @@ goclaw/
 │   ├── slack.go        # Slack 实现
 │   ├── discord.go      # Discord 实现
 │   ├── googlechat.go   # Google Chat 实现
-│   └── teams.go        # Microsoft Teams 实现
+│   ├── teams.go        # Microsoft Teams 实现
+│   └── weibo.go        # 微博实现
 ├── bus/                # 消息总线
 │   ├── events.go       # 消息事件
 │   └── queue.go        # 消息队列
@@ -219,6 +220,15 @@ goclaw 按以下顺序查找配置文件（找到第一个即使用）：
       "client_id": "",
       "secret": "",
       "allowed_ids": []
+    },
+    "weibo": {
+      "enabled": false,
+      "app_id": "",
+      "app_secret": "",
+      "ws_endpoint": "ws://open-im.api.weibo.com/ws/stream",
+      "token_endpoint": "http://open-im.api.weibo.com/open/auth/ws_token",
+      "dm_policy": "open",
+      "allow_from": []
     }
   },
   "providers": {
