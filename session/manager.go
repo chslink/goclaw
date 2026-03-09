@@ -173,6 +173,7 @@ type Manager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 	baseDir  string
+	saveMu   sync.Map // map[string]*sync.Mutex - per-session save mutex
 }
 
 // NewManager 创建会话管理器
@@ -224,10 +225,12 @@ func (m *Manager) Save(session *Session) error {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 
-	// 确定文件路径
+	saveMu := m.getSaveMutex(session.Key)
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
 	filePath := m.sessionPath(session.Key)
 
-	// 创建临时文件
 	tmpPath := filePath + ".tmp"
 	file, err := os.Create(tmpPath)
 	if err != nil {
@@ -235,7 +238,6 @@ func (m *Manager) Save(session *Session) error {
 	}
 	defer file.Close()
 
-	// 写入元数据行
 	encoder := json.NewEncoder(file)
 	metadata := map[string]interface{}{
 		"_type":      "metadata",
@@ -247,19 +249,30 @@ func (m *Manager) Save(session *Session) error {
 		return err
 	}
 
-	// 写入消息
 	for _, msg := range session.Messages {
 		if err := encoder.Encode(msg); err != nil {
 			return err
 		}
 	}
 
-	// 原子性重命名
 	if err := os.Rename(tmpPath, filePath); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (m *Manager) getSaveMutex(key string) *sync.Mutex {
+	if mu, ok := m.saveMu.Load(key); ok {
+		return mu.(*sync.Mutex)
+	}
+
+	mu := &sync.Mutex{}
+	actual, loaded := m.saveMu.LoadOrStore(key, mu)
+	if loaded {
+		return actual.(*sync.Mutex)
+	}
+	return mu
 }
 
 // Delete 删除会话
