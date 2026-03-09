@@ -52,9 +52,11 @@ func NewSQLiteStore(config StoreConfig) (*SQLiteStore, error) {
 	if config.DBPath == "" {
 		return nil, fmt.Errorf("database path is required")
 	}
-	if config.Provider == nil {
-		return nil, fmt.Errorf("embedding provider is required")
-	}
+
+	// Provider is optional - vector search will be disabled if not provided
+	// if config.Provider == nil {
+	// 	return nil, fmt.Errorf("embedding provider is required")
+	// }
 
 	// Ensure directory exists
 	dir := filepath.Dir(config.DBPath)
@@ -177,13 +179,20 @@ func (s *SQLiteStore) initSchema(config StoreConfig) error {
 
 	// Store schema version
 	s.setMeta("schema_version", "1")
-	s.setMeta("provider_dimension", fmt.Sprintf("%d", s.provider.Dimension()))
+	if s.provider != nil {
+		s.setMeta("provider_dimension", fmt.Sprintf("%d", s.provider.Dimension()))
+	}
 
 	return nil
 }
 
 // initVectorSearch initializes vector similarity search using sqlite-vec
 func (s *SQLiteStore) initVectorSearch() error {
+	// Skip if no embedding provider
+	if s.provider == nil {
+		return fmt.Errorf("embedding provider not configured")
+	}
+
 	// Try to load sqlite-vec extension
 	extensionPath := os.Getenv("SQLITE_VEC_EXTENSION")
 	if extensionPath == "" {
