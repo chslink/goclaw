@@ -1,29 +1,29 @@
 ---
-summary: "Workspace template for TOOLS.md"
+summary: "TOOLS.md 工作空间模板"
 read_when:
-  - Bootstrapping a workspace manually
+  - 手动初始化工作空间
 ---
 
-# TOOLS.md - Local Tool Notes
+# TOOLS.md - 本地工具笔记
 
-Keep local configuration notes here — camera names, SSH details, API keys (never secrets), voice preferences, etc.
+在此保存本地配置笔记——摄像头名称、SSH详情、API密钥（绝不存储真正的密钥）、语音偏好等。
 
-This file is for **reference only**. Never store actual secrets or API keys here.
+此文件仅供**参考**。切勿在此存储真正的密钥或API密钥。
 
-## Example Sections
+## 示例章节
 
-### Cameras
-- Living room: `camera-living-room.local`
-- Office: `192.168.1.50`
+### 摄像头
+- 客厅：`camera-living-room.local`
+- 办公室：`192.168.1.50`
 
 ### SSH
-- Server: `user@example.com`
-- Port: `2222`
+- 服务器：`user@example.com`
+- 端口：`2222`
 
-### Voice
-- Default voice: `eleven_monolingual_v1`
-- Speed: `1.0`
+### 语音
+- 默认语音：`eleven_monolingual_v1`
+- 语速：`1.0`
 
 ---
 
-Add your own sections as needed.
+根据需要添加自己的章节。

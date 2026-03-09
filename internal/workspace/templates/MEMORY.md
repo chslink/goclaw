@@ -1,29 +1,29 @@
-# MEMORY.md - Long-Term Memory
+# MEMORY.md - 长期记忆
 
-This file contains curated, long-term memories that persist across sessions.
+此文件包含跨会话持久化的精选长期记忆。
 
-**Security Note:** This file is ONLY loaded in main sessions (direct chats with your human).
-It is NOT loaded in shared contexts (group chats, public channels).
+**安全提示：** 此文件仅在主会话中加载（与你人类的直接对话）。
+它不会在共享上下文中加载（群聊、公共频道）。
 
-## Sections
+## 章节
 
-### Projects
-_(Add important project context here)_
-
-
-### Preferences
-_(Record user preferences and conventions)_
+### 项目
+_（在此添加重要的项目背景）_
 
 
-### Lessons Learned
-_(Document important lessons learned)_
+### 偏好
+_（记录用户偏好和约定）_
 
 
-### Decisions Made
-_(Record significant decisions and their rationale)_
+### 经验教训
+_（记录重要的经验教训）_
+
+
+### 已做决策
+_（记录重要决策及其理由）_
 
 
 ---
 
-Keep this file organized and concise. This is curated wisdom, not raw logs.
-For daily logs, use `memory/YYYY-MM-DD.md`.
+保持此文件有序且简洁。这是精选的智慧，不是原始日志。
+对于日常日志，使用 `memory/YYYY-MM-DD.md`。
