@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/smallnest/goclaw/config"
+	"github.com/smallnest/goclaw/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +39,68 @@ var agentsDeleteCmd = &cobra.Command{
 	Short: "Delete an agent",
 	Args:  cobra.ExactArgs(1),
 	Run:   runAgentsDelete,
+}
+
+var agentsIdentityCmd = &cobra.Command{
+	Use:   "identity <name>",
+	Short: "Edit agent's IDENTITY.md file",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsIdentity,
+}
+
+var agentsSoulCmd = &cobra.Command{
+	Use:   "soul <name>",
+	Short: "Edit agent's SOUL.md file",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsSoul,
+}
+
+var agentsUserCmd = &cobra.Command{
+	Use:   "user <name>",
+	Short: "Edit agent's USER.md file",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsUser,
+}
+
+var agentsToolsCmd = &cobra.Command{
+	Use:   "tools <name>",
+	Short: "Edit agent's TOOLS.md file",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsTools,
+}
+
+var agentsMemoryCmd = &cobra.Command{
+	Use:   "memory <name>",
+	Short: "Edit agent's MEMORY.md file",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsMemory,
+}
+
+var agentsBootstrapCmd = &cobra.Command{
+	Use:   "bootstrap <name>",
+	Short: "Initialize agent workspace with template files",
+	Args:  cobra.ExactArgs(1),
+	Run:   runAgentsBootstrap,
+}
+
+func runAgentsIdentity(cmd *cobra.Command, args []string) {
+	runAgentsEditFile("IDENTITY.md", args[0])
+}
+
+func runAgentsSoul(cmd *cobra.Command, args []string) {
+	runAgentsEditFile("SOUL.md", args[0])
+}
+
+func runAgentsUser(cmd *cobra.Command, args []string) {
+	runAgentsEditFile("USER.md", args[0])
+}
+
+func runAgentsTools(cmd *cobra.Command, args []string) {
+	runAgentsEditFile("TOOLS.md", args[0])
+}
+
+func runAgentsMemory(cmd *cobra.Command, args []string) {
+	runAgentsEditFile("MEMORY.md", args[0])
 }
 
 // Flags for agents list
@@ -80,6 +145,12 @@ func init() {
 	agentsCmd.AddCommand(agentsListCmd)
 	agentsCmd.AddCommand(agentsAddCmd)
 	agentsCmd.AddCommand(agentsDeleteCmd)
+	agentsCmd.AddCommand(agentsIdentityCmd)
+	agentsCmd.AddCommand(agentsSoulCmd)
+	agentsCmd.AddCommand(agentsUserCmd)
+	agentsCmd.AddCommand(agentsToolsCmd)
+	agentsCmd.AddCommand(agentsMemoryCmd)
+	agentsCmd.AddCommand(agentsBootstrapCmd)
 }
 
 // AgentInfo represents agent configuration information
@@ -355,4 +426,104 @@ func saveAgent(agent *AgentInfo) error {
 	}
 
 	return os.WriteFile(agent.ConfigPath, data, 0644)
+}
+
+// getAgentWorkspace gets the workspace path for an agent
+func getAgentWorkspace(name string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
+	agentConfigPath := filepath.Join(agentsDir, name+".json")
+
+	agent, err := loadAgent(agentConfigPath)
+	if err != nil {
+		return "", fmt.Errorf("agent '%s' not found", name)
+	}
+
+	return agent.Workspace, nil
+}
+
+// runAgentsEditFile opens an editor for a specific file in the agent's workspace
+func runAgentsEditFile(filename, name string) {
+	workspacePath, err := getAgentWorkspace(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	filePath := filepath.Join(workspacePath, filename)
+
+	// Ensure the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Create empty file
+		if err := os.WriteFile(filePath, []byte(""), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating file: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Get editor from environment
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		// Default editors based on platform
+		if strings.Contains(strings.ToLower(os.Getenv("OS")), "windows") {
+			editor = "notepad"
+		} else {
+			editor = "nano"
+		}
+	}
+
+	// Open editor
+	editorCmd := exec.Command(editor, filePath)
+	editorCmd.Stdin = os.Stdin
+	editorCmd.Stdout = os.Stdout
+	editorCmd.Stderr = os.Stderr
+
+	if err := editorCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening editor: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Updated %s for agent '%s'\n", filename, name)
+}
+
+// runAgentsBootstrap initializes the agent workspace with template files
+func runAgentsBootstrap(cmd *cobra.Command, args []string) {
+	name := args[0]
+
+	workspacePath, err := getAgentWorkspace(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create workspace directory if it doesn't exist
+	if err := os.MkdirAll(workspacePath, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating workspace: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize workspace with template files
+	wsMgr := workspace.NewManager(workspacePath)
+	if err := wsMgr.Ensure(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing workspace: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Initialized workspace for agent '%s'\n", name)
+	fmt.Printf("  Workspace: %s\n", workspacePath)
+	fmt.Println("\nCreated files:")
+	for _, f := range workspace.BootstrapFiles {
+		fmt.Printf("  - %s\n", f)
+	}
+	fmt.Println("\nEdit these files to customize your agent:")
+	fmt.Printf("  goclaw agents identity %s\n", name)
+	fmt.Printf("  goclaw agents soul %s\n", name)
+	fmt.Printf("  goclaw agents user %s\n", name)
 }
