@@ -3,14 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
 	"github.com/smallnest/goclaw/cli"
 )
 
-// Version information, populated by goreleaser
 var (
 	Version = "dev"
 	Commit  = "unknown"
@@ -19,10 +16,8 @@ var (
 )
 
 func main() {
-	// Setup signal handler for dumping goroutine stack traces
 	setupStackDumpSignal()
 
-	// Set version in CLI package
 	cli.SetVersion(Version)
 
 	if err := cli.Execute(); err != nil {
@@ -30,29 +25,8 @@ func main() {
 	}
 }
 
-// setupStackDumpSignal sets up a signal handler for SIGUSR1/SIGQUIT
-// to dump all goroutine stack traces without terminating the program.
-// This is useful for debugging "stuck" or slow applications.
-//
-// Usage: kill -SIGUSR1 <pid> or kill -SIGQUIT <pid>
-// Based on: https://colobu.com/2016/12/21/how-to-dump-goroutine-stack-traces/
-func setupStackDumpSignal() {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGUSR1, syscall.SIGQUIT)
-
-	go func() {
-		for range ch {
-			dumpGoroutineStacks()
-		}
-	}()
-}
-
-// dumpGoroutineStacks dumps all goroutine stack traces to stderr.
-// It uses runtime.Stack to get stack traces for all goroutines.
 func dumpGoroutineStacks() {
-	// Get stack traces for all goroutines
-	// The buffer size (4MB) should be enough for most applications
-	buf := make([]byte, 1<<20) // 1MB per goroutine, can hold up to 4MB
+	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
 	if n == 0 {
 		fmt.Fprintln(os.Stderr, "No goroutine stack traces available")

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -96,9 +95,7 @@ func (t *ShellTool) execDirect(ctx context.Context, command string) (string, err
 	}
 
 	// 设置进程组，确保能够杀死整个进程树
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	setSysProcAttr(cmd)
 
 	// 获取输出管道
 	stdout, err := cmd.StdoutPipe()
@@ -180,17 +177,17 @@ func (t *ShellTool) execDirect(ctx context.Context, command string) (string, err
 		// 超时：强制杀死进程组
 		if cmd.Process != nil {
 			// 先尝试优雅关闭（SIGTERM）
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			_ = killProcessGroup(cmd.Process.Pid, sigterm())
 			// 给进程一点时间清理
 			time.Sleep(100 * time.Millisecond)
 			// 再强制杀死（SIGKILL）
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcessGroup(cmd.Process.Pid, sigkill())
 		}
 		return "", fmt.Errorf("command timed out after %v", t.timeout)
 	case <-ctx.Done():
 		// 父 context 被取消
 		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcessGroup(cmd.Process.Pid, sigkill())
 		}
 		return "", ctx.Err()
 	}
