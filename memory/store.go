@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 // SQLiteStore implements the Store interface using SQLite
@@ -65,7 +66,7 @@ func NewSQLiteStore(config StoreConfig) (*SQLiteStore, error) {
 	}
 
 	// Open database connection
-	db, err := sql.Open("sqlite", config.DBPath)
+	db, err := sql.Open("sqlite3", config.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

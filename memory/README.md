@@ -140,7 +140,7 @@ opts := memory.SearchOptions{
 
 ## Dependencies
 
-- `github.com/glebarez/sqlite` - Pure Go SQLite driver
+- `github.com/ncruces/go-sqlite3` - Pure Go SQLite driver (cgo-free, using wazero)
 - `github.com/google/uuid` - UUID generation
 
 ## Optional Extensions
