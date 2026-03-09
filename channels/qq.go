@@ -605,16 +605,42 @@ func (c *QQChannel) Send(msg *bus.OutboundMessage) error {
 		msgID = id
 	}
 
+	logger.Debug("QQ Send message",
+		zap.String("chat_type", chatType),
+		zap.String("chat_id", msg.ChatID),
+		zap.Int("content_len", len(msg.Content)),
+		zap.Int("media_count", len(msg.Media)),
+		zap.String("event_id", eventID),
+		zap.String("msg_id", msgID),
+	)
+
 	return c.sendEnhancedMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
 }
 
 func (c *QQChannel) sendEnhancedMessage(ctx context.Context, msg *bus.OutboundMessage, chatType string, msgSeq int64, eventID, msgID string) error {
 	if len(msg.Media) > 0 {
-		return c.sendMediaMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+		if err := c.sendMediaMessage(ctx, msg, chatType, msgSeq, eventID, msgID); err != nil {
+			logger.Warn("Media message failed, will try text fallback",
+				zap.Error(err),
+				zap.String("chat_type", chatType),
+			)
+		} else if msg.Content == "" {
+			return nil
+		}
 	}
 
 	if c.isMarkdownContent(msg.Content) {
-		return c.sendMarkdownMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+		err := c.sendMarkdownMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+		if err != nil {
+			logger.Warn("Markdown message failed, falling back to plain text",
+				zap.Error(err),
+				zap.String("chat_type", chatType),
+				zap.String("chat_id", msg.ChatID),
+				zap.Int("content_len", len(msg.Content)),
+			)
+			return c.sendTextMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+		}
+		return nil
 	}
 
 	return c.sendTextMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
@@ -744,17 +770,35 @@ func (c *QQChannel) sendMediaMessage(ctx context.Context, msg *bus.OutboundMessa
 }
 
 func (c *QQChannel) dispatchMessage(ctx context.Context, chatType string, chatID string, message *dto.MessageToCreate) error {
+	logger.Debug("QQ dispatching message",
+		zap.String("chat_type", chatType),
+		zap.String("chat_id", chatID),
+		zap.Int("msg_type", int(message.MsgType)),
+		zap.Int("content_len", len(message.Content)),
+		zap.Bool("has_markdown", message.Markdown != nil),
+		zap.Bool("has_embed", message.Embed != nil),
+	)
+
+	var err error
 	switch chatType {
 	case "group":
-		_, err := c.api.PostGroupMessage(ctx, chatID, message)
-		return err
+		_, err = c.api.PostGroupMessage(ctx, chatID, message)
 	case "channel":
-		_, err := c.api.PostMessage(ctx, chatID, message)
-		return err
+		_, err = c.api.PostMessage(ctx, chatID, message)
 	default:
-		_, err := c.api.PostC2CMessage(ctx, chatID, message)
-		return err
+		_, err = c.api.PostC2CMessage(ctx, chatID, message)
 	}
+
+	if err != nil {
+		logger.Error("QQ API call failed",
+			zap.Error(err),
+			zap.String("chat_type", chatType),
+			zap.String("chat_id", chatID),
+			zap.Int("msg_type", int(message.MsgType)),
+			zap.String("content_preview", truncateString(message.Content, 200)),
+		)
+	}
+	return err
 }
 
 func (c *QQChannel) dispatchRichMediaMessage(ctx context.Context, chatType string, chatID string, msg *dto.RichMediaMessage) error {
@@ -778,6 +822,13 @@ func (c *QQChannel) sanitizeMarkdown(content string) string {
 	content = re.ReplaceAllString(content, "\n\n")
 
 	return content
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (c *QQChannel) SendEmbed(ctx context.Context, chatType string, chatID string, title, description string, fields map[string]string, thumbnailURL string, msgSeq int64, eventID, msgID string) error {
