@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -564,60 +566,284 @@ func (c *QQChannel) handleChannelATMessage(data json.RawMessage) {
 	_ = c.PublishInbound(context.Background(), msg)
 }
 
-// Send 发送消息
+const (
+	msgTypeText     = 0
+	msgTypeMarkdown = 2
+	msgTypeARK      = 3
+	msgTypeEmbed    = 4
+	msgTypeMedia    = 7
+)
+
+const (
+	mediaTypeImage = 1
+	mediaTypeVideo = 2
+	mediaTypeAudio = 3
+	mediaTypeFile  = 4
+)
+
 func (c *QQChannel) Send(msg *bus.OutboundMessage) error {
 	if c.api == nil {
 		return fmt.Errorf("QQ API not initialized")
 	}
 
-	// 使用带超时的 context，防止 API 调用阻塞
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 获取或递增 msg_seq
 	msgSeq := c.getNextMsgSeq(msg.ChatID)
 
-	// 构建消息
-	messageToSend := &dto.MessageToCreate{
-		Content:   msg.Content,
-		Timestamp: time.Now().UnixMilli(),
+	chatType := "c2c"
+	if t, ok := msg.Metadata["chat_type"].(string); ok {
+		chatType = t
 	}
 
-	// 判断消息类型并调用对应 API
-	var err error
-	if chatType, ok := msg.Metadata["chat_type"].(string); ok {
-		switch chatType {
-		case "group":
-			err = c.sendGroupMessage(ctx, msg.ChatID, messageToSend, msgSeq)
-		case "channel":
-			err = c.sendChannelMessage(ctx, msg.ChatID, messageToSend, msgSeq)
-		default:
-			err = c.sendC2CMessage(ctx, msg.ChatID, messageToSend, msgSeq)
+	eventID := ""
+	if id, ok := msg.Metadata["event_id"].(string); ok {
+		eventID = id
+	}
+	msgID := ""
+	if id, ok := msg.Metadata["msg_id"].(string); ok {
+		msgID = id
+	}
+
+	return c.sendEnhancedMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+}
+
+func (c *QQChannel) sendEnhancedMessage(ctx context.Context, msg *bus.OutboundMessage, chatType string, msgSeq int64, eventID, msgID string) error {
+	if len(msg.Media) > 0 {
+		return c.sendMediaMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+	}
+
+	if c.isMarkdownContent(msg.Content) {
+		return c.sendMarkdownMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+	}
+
+	return c.sendTextMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+}
+
+func (c *QQChannel) isMarkdownContent(content string) bool {
+	mdIndicators := []string{
+		"**", "__", "`", "~~",
+		"###", "##", "#",
+		"- ", "* ", "+ ",
+		"1. ", "2. ", "3. ",
+		"[", "](",
+		"![", "](",
+		"> ",
+		"|", "---",
+		"```",
+	}
+
+	for _, indicator := range mdIndicators {
+		if strings.Contains(content, indicator) {
+			return true
 		}
-	} else {
-		// 默认 C2C 私聊
-		err = c.sendC2CMessage(ctx, msg.ChatID, messageToSend, msgSeq)
+	}
+	return false
+}
+
+func (c *QQChannel) sendTextMessage(ctx context.Context, msg *bus.OutboundMessage, chatType string, msgSeq int64, eventID, msgID string) error {
+	message := &dto.MessageToCreate{
+		Content:   msg.Content,
+		MsgType:   msgTypeText,
+		Timestamp: time.Now().UnixMilli(),
+		MsgSeq:    uint32(msgSeq),
 	}
 
-	return err
+	if eventID != "" {
+		message.EventID = eventID
+	}
+	if msgID != "" {
+		message.MsgID = msgID
+	}
+
+	return c.dispatchMessage(ctx, chatType, msg.ChatID, message)
 }
 
-// sendC2CMessage 发送 C2C 消息
-func (c *QQChannel) sendC2CMessage(ctx context.Context, openID string, msg *dto.MessageToCreate, msgSeq int64) error {
-	_, err := c.api.PostC2CMessage(ctx, openID, msg)
-	return err
+func (c *QQChannel) sendMarkdownMessage(ctx context.Context, msg *bus.OutboundMessage, chatType string, msgSeq int64, eventID, msgID string) error {
+	mdContent := c.sanitizeMarkdown(msg.Content)
+
+	message := &dto.MessageToCreate{
+		MsgType:   msgTypeMarkdown,
+		Timestamp: time.Now().UnixMilli(),
+		MsgSeq:    uint32(msgSeq),
+		Markdown: &dto.Markdown{
+			Content: mdContent,
+		},
+	}
+
+	if eventID != "" {
+		message.EventID = eventID
+	}
+	if msgID != "" {
+		message.MsgID = msgID
+	}
+
+	return c.dispatchMessage(ctx, chatType, msg.ChatID, message)
 }
 
-// sendGroupMessage 发送群消息
-func (c *QQChannel) sendGroupMessage(ctx context.Context, groupID string, msg *dto.MessageToCreate, msgSeq int64) error {
-	_, err := c.api.PostGroupMessage(ctx, groupID, msg)
-	return err
+func (c *QQChannel) sendMediaMessage(ctx context.Context, msg *bus.OutboundMessage, chatType string, msgSeq int64, eventID, msgID string) error {
+	var lastErr error
+
+	for _, media := range msg.Media {
+		richMsg := &dto.RichMediaMessage{
+			MsgSeq: msgSeq,
+		}
+
+		if eventID != "" {
+			richMsg.EventID = eventID
+		}
+
+		switch media.Type {
+		case "image":
+			richMsg.FileType = mediaTypeImage
+		case "video":
+			richMsg.FileType = mediaTypeVideo
+		case "audio":
+			richMsg.FileType = mediaTypeAudio
+		default:
+			richMsg.FileType = mediaTypeFile
+		}
+
+		if media.URL != "" {
+			richMsg.URL = media.URL
+			richMsg.SrvSendMsg = true
+		} else if media.Base64 != "" {
+			logger.Warn("Base64 media not supported, please provide URL instead",
+				zap.String("media_type", media.Type),
+			)
+			lastErr = fmt.Errorf("base64 media not supported, please provide URL")
+			continue
+		} else {
+			logger.Warn("Media has no URL or Base64, skipping",
+				zap.String("media_type", media.Type),
+			)
+			lastErr = fmt.Errorf("media has no URL or Base64 data")
+			continue
+		}
+
+		if err := c.dispatchRichMediaMessage(ctx, chatType, msg.ChatID, richMsg); err != nil {
+			lastErr = err
+			logger.Warn("Failed to send media message",
+				zap.String("chat_type", chatType),
+				zap.String("chat_id", msg.ChatID),
+				zap.Error(err),
+			)
+		} else {
+			lastErr = nil
+		}
+	}
+
+	if msg.Content != "" {
+		if c.isMarkdownContent(msg.Content) {
+			return c.sendMarkdownMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+		}
+		return c.sendTextMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
+	}
+
+	return lastErr
 }
 
-// sendChannelMessage 发送频道消息
-func (c *QQChannel) sendChannelMessage(ctx context.Context, channelID string, msg *dto.MessageToCreate, msgSeq int64) error {
-	_, err := c.api.PostMessage(ctx, channelID, msg)
-	return err
+func (c *QQChannel) dispatchMessage(ctx context.Context, chatType string, chatID string, message *dto.MessageToCreate) error {
+	switch chatType {
+	case "group":
+		_, err := c.api.PostGroupMessage(ctx, chatID, message)
+		return err
+	case "channel":
+		_, err := c.api.PostMessage(ctx, chatID, message)
+		return err
+	default:
+		_, err := c.api.PostC2CMessage(ctx, chatID, message)
+		return err
+	}
+}
+
+func (c *QQChannel) dispatchRichMediaMessage(ctx context.Context, chatType string, chatID string, msg *dto.RichMediaMessage) error {
+	switch chatType {
+	case "group":
+		_, err := c.api.PostGroupMessage(ctx, chatID, msg)
+		return err
+	case "channel":
+		return fmt.Errorf("channel does not support rich media via this API")
+	default:
+		_, err := c.api.PostC2CMessage(ctx, chatID, msg)
+		return err
+	}
+}
+
+func (c *QQChannel) sanitizeMarkdown(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	re := regexp.MustCompile(`\n{3,}`)
+	content = re.ReplaceAllString(content, "\n\n")
+
+	return content
+}
+
+func (c *QQChannel) SendEmbed(ctx context.Context, chatType string, chatID string, title, description string, fields map[string]string, thumbnailURL string, msgSeq int64, eventID, msgID string) error {
+	message := &dto.MessageToCreate{
+		MsgType:   msgTypeEmbed,
+		Timestamp: time.Now().UnixMilli(),
+		MsgSeq:    uint32(msgSeq),
+		Embed: &dto.Embed{
+			Title:       title,
+			Description: description,
+			Prompt:      description,
+		},
+	}
+
+	if thumbnailURL != "" {
+		message.Embed.Thumbnail = dto.MessageEmbedThumbnail{
+			URL: thumbnailURL,
+		}
+	}
+
+	if len(fields) > 0 {
+		for name, value := range fields {
+			message.Embed.Fields = append(message.Embed.Fields, &dto.EmbedField{
+				Name:  name,
+				Value: value,
+			})
+		}
+	}
+
+	if eventID != "" {
+		message.EventID = eventID
+	}
+	if msgID != "" {
+		message.MsgID = msgID
+	}
+
+	return c.dispatchMessage(ctx, chatType, chatID, message)
+}
+
+func (c *QQChannel) SendMarkdownWithTemplate(ctx context.Context, chatType string, chatID string, templateID string, params map[string][]string, msgSeq int64, eventID, msgID string) error {
+	var mdParams []*dto.MarkdownParams
+	for key, values := range params {
+		mdParams = append(mdParams, &dto.MarkdownParams{
+			Key:    key,
+			Values: values,
+		})
+	}
+
+	message := &dto.MessageToCreate{
+		MsgType:   msgTypeMarkdown,
+		Timestamp: time.Now().UnixMilli(),
+		MsgSeq:    uint32(msgSeq),
+		Markdown: &dto.Markdown{
+			CustomTemplateID: templateID,
+			Params:           mdParams,
+		},
+	}
+
+	if eventID != "" {
+		message.EventID = eventID
+	}
+	if msgID != "" {
+		message.MsgID = msgID
+	}
+
+	return c.dispatchMessage(ctx, chatType, chatID, message)
 }
 
 // getNextMsgSeq 获取下一个消息序列号
