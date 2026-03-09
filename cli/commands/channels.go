@@ -123,6 +123,7 @@ func getAllKnownChannels() []ChannelInfo {
 		{Name: "teams", Enabled: false},
 		{Name: "googlechat", Enabled: false},
 		{Name: "infoflow", Enabled: false},
+		{Name: "weibo", Enabled: false},
 	}
 }
 
