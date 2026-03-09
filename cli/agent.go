@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/smallnest/goclaw/bus"
 	"github.com/smallnest/goclaw/config"
 	"github.com/smallnest/goclaw/internal/logger"
+	workspace2 "github.com/smallnest/goclaw/internal/workspace"
 	"github.com/smallnest/goclaw/providers"
 	"github.com/smallnest/goclaw/session"
 	"github.com/spf13/cobra"
@@ -91,15 +93,34 @@ func runAgent(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Create workspace
+	// Get home directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get home directory: %v\n", err)
 		os.Exit(1)
 	}
-	workspace := homeDir + "/.goclaw/workspace"
-	if err := os.MkdirAll(workspace, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create workspace: %v\n", err)
+
+	// Determine workspace based on --agent parameter
+	var workspace string
+	var agentInfo *AgentInfo
+	if agentID != "" {
+		agentInfo, err = loadAgentByName(homeDir, agentID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load agent '%s': %v\n", agentID, err)
+			os.Exit(1)
+		}
+		workspace = agentInfo.Workspace
+		if agentVerbose {
+			fmt.Fprintf(os.Stderr, "Using agent '%s' with workspace: %s\n", agentID, workspace)
+		}
+	} else {
+		workspace = homeDir + "/.goclaw/workspace"
+	}
+
+	// Ensure workspace directory exists and is initialized
+	wsMgr := workspace2.NewManager(workspace)
+	if err := wsMgr.Ensure(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize workspace: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -109,6 +130,10 @@ func runAgent(cmd *cobra.Command, args []string) {
 
 	// Create session manager
 	sessionDir := homeDir + "/.goclaw/sessions"
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create sessions directory: %v\n", err)
+		os.Exit(1)
+	}
 	sessionMgr, err := session.NewManager(sessionDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create session manager: %v\n", err)
@@ -245,6 +270,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 		Channel:   agentChannel,
 		SenderID:  "cli",
 		ChatID:    "default",
+		AgentID:   agentID,
 		Content:   agentMessage,
 		Timestamp: time.Now(),
 	}
@@ -420,4 +446,17 @@ func deliverResponse(ctx context.Context, messageBus *bus.MessageBus, content st
 		Content:   content,
 		Timestamp: time.Now(),
 	})
+}
+
+// loadAgentByName loads an agent configuration by name
+func loadAgentByName(homeDir, name string) (*AgentInfo, error) {
+	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
+	agentConfigPath := filepath.Join(agentsDir, name+".json")
+
+	agent, err := loadAgent(agentConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("agent '%s' not found: %w", name, err)
+	}
+
+	return agent, nil
 }

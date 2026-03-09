@@ -11,6 +11,7 @@ type InboundMessage struct {
 	AccountID string                 `json:"account_id"` // 账号ID（用于多账号场景）
 	SenderID  string                 `json:"sender_id"`  // 发送者ID
 	ChatID    string                 `json:"chat_id"`    // 聊天ID
+	AgentID   string                 `json:"agent_id"`   // Agent ID（用于多 agent 场景）
 	Content   string                 `json:"content"`    // 消息内容
 	Media     []Media                `json:"media"`      // 媒体文件
 	Metadata  map[string]interface{} `json:"metadata"`   // 元数据
@@ -27,6 +28,9 @@ type Media struct {
 
 // SessionKey 返回会话键
 func (m *InboundMessage) SessionKey() string {
+	if m.AgentID != "" {
+		return m.Channel + ":" + m.AgentID + ":" + m.ChatID
+	}
 	return m.Channel + ":" + m.ChatID
 }
 

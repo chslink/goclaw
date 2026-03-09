@@ -11,7 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/smallnest/goclaw/config"
-	"github.com/smallnest/goclaw/internal/workspace"
+	workspace2 "github.com/smallnest/goclaw/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -287,13 +287,14 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 
 	// Save agent configuration
 	if err := saveAgent(agent); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving agent: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error saving agent: %v (path: %s)\n", err, agent.ConfigPath)
 		os.Exit(1)
 	}
 
-	// Create workspace directory
-	if err := os.MkdirAll(workspace, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Could not create workspace: %v\n", err)
+	// Create and initialize workspace directory with bootstrap files
+	wsMgr := workspace2.NewManager(workspace)
+	if err := wsMgr.Ensure(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not initialize workspace: %v\n", err)
 	}
 
 	if agentsAddJSON {
@@ -310,6 +311,10 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 		if len(agentsAddBind) > 0 {
 			fmt.Printf("  Bindings: %v\n", agentsAddBind)
 		}
+		fmt.Printf("\nWorkspace initialized with bootstrap files.\n")
+		fmt.Printf("Customize your agent:\n")
+		fmt.Printf("  goclaw agents identity %s\n", name)
+		fmt.Printf("  goclaw agents soul %s\n", name)
 	}
 }
 
@@ -420,12 +425,27 @@ func loadAgent(path string) (*AgentInfo, error) {
 
 // saveAgent saves an agent configuration
 func saveAgent(agent *AgentInfo) error {
-	data, err := json.MarshalIndent(agent, "", "  ")
-	if err != nil {
-		return err
+	// Ensure the directory exists
+	dir := filepath.Dir(agent.ConfigPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create agents directory %s: %w", dir, err)
 	}
 
-	return os.WriteFile(agent.ConfigPath, data, 0644)
+	data, err := json.MarshalIndent(agent, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal agent: %w", err)
+	}
+
+	// Use absolute path and ensure it's properly formatted
+	absPath, err := filepath.Abs(agent.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	if err := os.WriteFile(absPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", absPath, err)
+	}
+	return nil
 }
 
 // getAgentWorkspace gets the workspace path for an agent
@@ -510,7 +530,7 @@ func runAgentsBootstrap(cmd *cobra.Command, args []string) {
 	}
 
 	// Initialize workspace with template files
-	wsMgr := workspace.NewManager(workspacePath)
+	wsMgr := workspace2.NewManager(workspacePath)
 	if err := wsMgr.Ensure(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing workspace: %v\n", err)
 		os.Exit(1)
@@ -519,7 +539,7 @@ func runAgentsBootstrap(cmd *cobra.Command, args []string) {
 	fmt.Printf("Initialized workspace for agent '%s'\n", name)
 	fmt.Printf("  Workspace: %s\n", workspacePath)
 	fmt.Println("\nCreated files:")
-	for _, f := range workspace.BootstrapFiles {
+	for _, f := range workspace2.BootstrapFiles {
 		fmt.Printf("  - %s\n", f)
 	}
 	fmt.Println("\nEdit these files to customize your agent:")

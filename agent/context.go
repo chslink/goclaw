@@ -58,10 +58,29 @@ func (b *ContextBuilder) buildSystemPromptWithSkills(skillsContent string, mode 
 		return "你是一个运行在 GoClaw 中的个人助手。"
 	}
 
+	// 先构建身份部分，检查是否禁用工具
+	identityPart := b.buildIdentityAndTools()
+
+	// 如果禁用工具，返回简化的提示词
+	if strings.Contains(identityPart, "没有工具可用") {
+		var parts []string
+		parts = append(parts, identityPart)
+
+		// 添加工作区信息
+		parts = append(parts, b.buildWorkspace())
+
+		// 添加运行时信息
+		if !isMinimal {
+			parts = append(parts, b.buildRuntime())
+		}
+
+		return fmt.Sprintf("%s\n\n", joinNonEmpty(parts, "\n\n---\n\n"))
+	}
+
 	var parts []string
 
 	// 1. 核心身份 + 工具列表
-	parts = append(parts, b.buildIdentityAndTools())
+	parts = append(parts, identityPart)
 
 	// 2. Tool Call Style
 	parts = append(parts, b.buildToolCallStyle())
@@ -124,6 +143,40 @@ func (b *ContextBuilder) buildSystemPromptWithSkills(skillsContent string, mode 
 func (b *ContextBuilder) buildIdentityAndTools() string {
 	now := time.Now()
 
+	// 尝试从 IDENTITY.md 读取自定义身份
+	customIdentity, err := b.memory.ReadBootstrapFile("IDENTITY.md")
+	if err != nil {
+		logger.Debug("Failed to read IDENTITY.md", zap.Error(err))
+	}
+	hasCustomIdentity := customIdentity != "" && !strings.Contains(customIdentity, "选一个你喜欢的") && !strings.Contains(customIdentity, "在第一次对话中填写")
+
+	logger.Debug("buildIdentityAndTools",
+		zap.Bool("has_custom_identity", hasCustomIdentity),
+		zap.Int("identity_length", len(customIdentity)),
+		zap.String("workspace", b.workspace))
+
+	// 检查是否禁止使用工具
+	disableTools := strings.Contains(customIdentity, "禁止使用任何工具") ||
+		strings.Contains(customIdentity, "禁止使用工具") ||
+		strings.Contains(customIdentity, "FORBIDDEN to use any tools") ||
+		strings.Contains(customIdentity, "cannot use any tools")
+
+	// 如果禁止使用工具，只返回身份信息
+	if hasCustomIdentity && disableTools {
+		logger.Debug("Tools disabled, returning identity-only prompt")
+		return fmt.Sprintf(`# 身份
+
+%s
+
+**当前时间**: %s
+**工作区**: %s
+
+**注意：你没有工具可用，不需要执行任何任务。**`,
+			customIdentity,
+			now.Format("2006-01-02 15:04:05 MST"),
+			b.workspace)
+	}
+
 	// 定义核心工具摘要 - 参考了 OpenClaw 的详细描述风格
 	coreToolSummaries := map[string]string{
 		"browser_navigate":       "导航到 URL 并等待页面加载",
@@ -169,6 +222,53 @@ func (b *ContextBuilder) buildIdentityAndTools() string {
 		}
 	}
 
+	// 如果有自定义身份，使用自定义身份
+	if hasCustomIdentity {
+		return fmt.Sprintf(`# 身份
+
+%s
+
+**重要提示**：GoClaw 与 OpenClaw 是不同的项目。虽然技能系统兼容 OpenClaw 格式，但 CLI 命令完全不同。不要假设或使用 OpenClaw 的命令。使用任何命令前，请先运行 `+"`goclaw --help`"+` 查看实际可用的命令。
+
+**当前时间**: %s
+**工作区**: %s
+
+## 工具
+
+工具可用性（按策略过滤）：
+工具名称区分大小写。请完全按照列出的名称调用工具。
+%s
+TOOLS.md 不控制工具可用性；它是用户使用外部工具的指导文档。
+
+### 任务复杂度指南
+
+- **简单任务**：直接使用工具
+- **中等任务**：使用工具，叙述关键步骤
+- **复杂/长任务**：考虑启动子代理。完成是推送式的：完成后会自动通知
+- **长时间等待**：避免快速轮询循环。使用 run_shell 的后台模式，或 process(action=poll, timeout=<ms>)
+
+### 技能优先工作流（最高优先级）
+
+1. **始终先检查技能部分**，然后再使用其他工具
+2. 如果找到匹配的技能，使用 use_skill 工具并传入技能名称作为参数
+3. 如果没有匹配的技能：使用内置工具
+4. 只有在检查技能后才应继续使用内置工具
+
+### 核心规则
+
+- 对于任何搜索请求（"搜索"、"查找"、"谷歌搜索"等）：立即调用 web_search 工具。不要提供手动说明或建议。
+- 当用户询问信息时：使用你的工具获取。不要解释如何获取。
+- 不要告诉用户"我无法"或"这是你自己做的方法"。用工具实际去做。
+- 如果你有可用于任务的工具，就使用它。安全操作不需要许可。
+- **切勿捏造搜索结果**：展示搜索结果时，只使用工具返回的确切数据。如果没有找到结果，明确说明未找到结果。
+- 当工具失败时：分析错误，尝试替代方法，除非绝对必要否则不要询问用户。`,
+			customIdentity,
+			now.Format("2006-01-02 15:04:05 MST"),
+			b.workspace,
+			strings.Join(toolLines, "\n"))
+	}
+
+	// 默认身份
 	return fmt.Sprintf(`# 身份
 
 你是 **GoClaw**，一个在用户系统上运行的个人 AI 助手。

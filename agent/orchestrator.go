@@ -238,6 +238,33 @@ func (o *Orchestrator) streamAssistantResponse(ctx context.Context, state *Agent
 	// Prepare tool definitions
 	toolDefs := convertToToolDefinitions(state.Tools)
 
+	// Build system prompt first to check if tools should be disabled
+	var systemPromptContent string
+	if o.config.ContextBuilder != nil {
+		skillsContent := ""
+		if len(state.LoadedSkills) > 0 {
+			skillsContent = o.config.ContextBuilder.buildSelectedSkills(state.LoadedSkills, o.config.Skills)
+		} else if len(o.config.Skills) > 0 {
+			skillsContent = o.config.ContextBuilder.buildSkillsPrompt(o.config.Skills, PromptModeFull)
+		}
+		systemPromptContent = o.config.ContextBuilder.buildSystemPromptWithSkills(skillsContent, PromptModeFull)
+	}
+
+	// Check if tools should be disabled based on system prompt content
+	if strings.Contains(systemPromptContent, "没有工具可用") ||
+		strings.Contains(systemPromptContent, "禁止使用任何工具") ||
+		strings.Contains(systemPromptContent, "FORBIDDEN to use any tools") ||
+		strings.Contains(systemPromptContent, "cannot use any tools") {
+		toolDefs = nil
+		logger.Info("Tools disabled based on identity configuration")
+	}
+
+	// Debug: log system prompt length
+	logger.Debug("System prompt built",
+		zap.Int("content_length", len(systemPromptContent)),
+		zap.Bool("has_identity", strings.Contains(systemPromptContent, "IDENTITY.md")),
+		zap.Bool("has_cat", strings.Contains(systemPromptContent, "cat") || strings.Contains(systemPromptContent, "Cat")))
+
 	// Emit message start
 	o.emit(NewEvent(EventMessageStart))
 
@@ -245,19 +272,10 @@ func (o *Orchestrator) streamAssistantResponse(ctx context.Context, state *Agent
 	fullMessages := []providers.Message{}
 
 	// Build system prompt with skills if context builder is available
-	if o.config.ContextBuilder != nil {
-		skillsContent := ""
-		if len(state.LoadedSkills) > 0 {
-			// Second phase: inject full content of loaded skills
-			skillsContent = o.config.ContextBuilder.buildSelectedSkills(state.LoadedSkills, o.config.Skills)
-		} else if len(o.config.Skills) > 0 {
-			// First phase: inject skill summary (available skills list)
-			skillsContent = o.config.ContextBuilder.buildSkillsPrompt(o.config.Skills, PromptModeFull)
-		}
-		systemPrompt := o.config.ContextBuilder.buildSystemPromptWithSkills(skillsContent, PromptModeFull)
+	if systemPromptContent != "" {
 		fullMessages = append(fullMessages, providers.Message{
 			Role:    "system",
-			Content: systemPrompt,
+			Content: systemPromptContent,
 		})
 	} else if state.SystemPrompt != "" {
 		// Fallback to stored system prompt
@@ -308,6 +326,8 @@ func (o *Orchestrator) callWithStreaming(ctx context.Context, sp providers.Strea
 	var contentBuilder, thinkingBuilder, finalBuilder strings.Builder
 	var toolCalls []providers.ToolCall
 	var streamErr error
+
+	toolsDisabled := len(tools) == 0
 
 	err := sp.ChatStream(ctx, messages, tools, func(chunk providers.StreamChunk) {
 		if chunk.Error != nil {
@@ -375,14 +395,21 @@ func (o *Orchestrator) callWithStreaming(ctx context.Context, sp providers.Strea
 		fullContent.WriteString("</final>")
 	}
 
+	content := fullContent.String()
+
+	// If tools are disabled, clean up any tool call syntax in the output
+	if toolsDisabled {
+		content = cleanToolCallSyntax(content)
+	}
+
 	response := &providers.Response{
-		Content:      fullContent.String(),
+		Content:      content,
 		ToolCalls:    toolCalls,
 		FinishReason: "stop",
 	}
 
 	logger.Info("=== LLM Streaming Response Complete ===",
-		zap.Int("content_length", fullContent.Len()),
+		zap.Int("content_length", len(content)),
 		zap.Int("tool_calls_count", len(toolCalls)))
 
 	// Emit message end
@@ -395,6 +422,63 @@ func (o *Orchestrator) callWithStreaming(ctx context.Context, sp providers.Strea
 		zap.Int("tool_calls_count", len(toolCalls)))
 
 	return assistantMsg, nil
+}
+
+// cleanToolCallSyntax removes tool call syntax from content when tools are disabled
+func cleanToolCallSyntax(content string) string {
+	// Pattern 1: ▱{tool_name(args)}▱ - remove entire block
+	// Pattern 2: ▱tool_name(args)▱ - remove entire block
+	// Pattern 3: tool_name(args) - remove if looks like tool call
+
+	// Remove ▱...▱ tool call blocks
+	for {
+		start := strings.Index(content, "▱")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(content[start+1:], "▱")
+		if end == -1 {
+			break
+		}
+		end += start + 1
+		content = content[:start] + content[end+1:]
+	}
+
+	// Remove common tool call patterns like web_search(...), run_shell(...), etc.
+	toolPatterns := []string{
+		"web_search", "run_shell", "read_file", "write_file", "list_dir",
+		"browser_navigate", "browser_screenshot", "browser_click", "browser_fill_input",
+		"browser_get_text", "browser_execute_script", "web_fetch", "use_skill",
+		"message", "cron", "session_status", "process",
+	}
+
+	for _, tool := range toolPatterns {
+		// Match tool_name(...) pattern
+		pattern := tool + "("
+		for {
+			idx := strings.Index(content, pattern)
+			if idx == -1 {
+				break
+			}
+			// Find matching closing paren
+			depth := 1
+			end := idx + len(pattern)
+			for end < len(content) && depth > 0 {
+				if content[end] == '(' {
+					depth++
+				} else if content[end] == ')' {
+					depth--
+				}
+				end++
+			}
+			content = content[:idx] + content[end:]
+		}
+	}
+
+	// Clean up extra whitespace
+	content = strings.TrimSpace(content)
+
+	return content
 }
 
 // executeToolCalls executes tool calls with interruption support
