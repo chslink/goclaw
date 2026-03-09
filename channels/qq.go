@@ -570,7 +570,9 @@ func (c *QQChannel) Send(msg *bus.OutboundMessage) error {
 		return fmt.Errorf("QQ API not initialized")
 	}
 
-	ctx := context.Background()
+	// 使用带超时的 context，防止 API 调用阻塞
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// 获取或递增 msg_seq
 	msgSeq := c.getNextMsgSeq(msg.ChatID)
