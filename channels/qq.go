@@ -629,6 +629,15 @@ func (c *QQChannel) sendEnhancedMessage(ctx context.Context, msg *bus.OutboundMe
 		}
 	}
 
+	if strings.TrimSpace(msg.Content) == "" {
+		logger.Warn("QQ message content is empty, skipping send",
+			zap.String("chat_type", chatType),
+			zap.String("chat_id", msg.ChatID),
+			zap.Int("media_count", len(msg.Media)),
+		)
+		return fmt.Errorf("message content is empty")
+	}
+
 	if c.isMarkdownContent(msg.Content) {
 		err := c.sendMarkdownMessage(ctx, msg, chatType, msgSeq, eventID, msgID)
 		if err != nil {
