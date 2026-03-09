@@ -236,7 +236,6 @@ func (m *Manager) Save(session *Session) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	metadata := map[string]interface{}{
@@ -246,16 +245,26 @@ func (m *Manager) Save(session *Session) error {
 		"metadata":   session.Metadata,
 	}
 	if err := encoder.Encode(metadata); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
 		return err
 	}
 
 	for _, msg := range session.Messages {
 		if err := encoder.Encode(msg); err != nil {
+			file.Close()
+			os.Remove(tmpPath)
 			return err
 		}
 	}
 
+	if err := file.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
 	if err := os.Rename(tmpPath, filePath); err != nil {
+		os.Remove(tmpPath)
 		return err
 	}
 
@@ -319,14 +328,11 @@ func (m *Manager) List() ([]string, error) {
 func (m *Manager) load(key string) (*Session, error) {
 	filePath := m.sessionPath(key)
 
-	// 打开文件
-	file, err := os.Open(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
-	// 创建会话
 	session := &Session{
 		Key:       key,
 		Messages:  []Message{},
@@ -335,15 +341,13 @@ func (m *Manager) load(key string) (*Session, error) {
 		Metadata:  make(map[string]interface{}),
 	}
 
-	// 解析文件
-	decoder := json.NewDecoder(file)
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	for decoder.More() {
 		var raw map[string]interface{}
 		if err := decoder.Decode(&raw); err != nil {
 			return nil, err
 		}
 
-		// 检查是否为元数据行
 		if msgType, ok := raw["_type"].(string); ok && msgType == "metadata" {
 			if createdAt, ok := raw["created_at"].(string); ok {
 				session.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -355,7 +359,6 @@ func (m *Manager) load(key string) (*Session, error) {
 				session.Metadata = metadata
 			}
 		} else {
-			// 消息行
 			data, _ := json.Marshal(raw)
 			var msg Message
 			if err := json.Unmarshal(data, &msg); err != nil {
