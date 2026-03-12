@@ -100,6 +100,11 @@ func NewRotationProviderFromConfig(cfg *config.Config) (Provider, error) {
 
 // createProviderByType 根据类型创建提供商
 func createProviderByType(providerType, apiKey, baseURL, model string, maxTokens int) (Provider, error) {
+	return CreateProviderByType(providerType, apiKey, baseURL, model, maxTokens)
+}
+
+// CreateProviderByType 根据类型创建提供商（导出版本，供 DecisionAgent 等组件使用）
+func CreateProviderByType(providerType, apiKey, baseURL, model string, maxTokens int) (Provider, error) {
 	switch ProviderType(providerType) {
 	case ProviderTypeOpenAI:
 		return NewOpenAIProvider(apiKey, baseURL, model, maxTokens)

@@ -16,6 +16,18 @@ var (
 	initialized bool
 )
 
+// WrapCore 用自定义 Core 包装现有 logger（用于注入日志 hook）。
+// wrapFn 接收当前 Core 并返回包装后的新 Core。
+func WrapCore(wrapFn func(zapcore.Core) zapcore.Core) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	if log == nil {
+		return
+	}
+	log = log.WithOptions(zap.WrapCore(wrapFn))
+	sugar = log.Sugar()
+}
+
 // Init 初始化日志 (线程安全)
 // 注意：多次调用 Init 只有第一次调用会真正初始化，后续调用会被忽略
 func Init(level string, development bool) error {
