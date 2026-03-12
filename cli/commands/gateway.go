@@ -282,6 +282,17 @@ func runGateway(cmd *cobra.Command, args []string) {
 	fmt.Printf("WebSocket: ws://%s:%d/ws\n", displayHost, displayPort)
 	fmt.Printf("Health: http://%s:%d/health\n", displayHost, displayPort)
 
+	// Admin UI 在 HTTP 端口上
+	httpPort := cfg.Gateway.Port
+	if httpPort == 0 {
+		httpPort = 8080
+	}
+	httpHost := cfg.Gateway.Host
+	if httpHost == "" || httpHost == "0.0.0.0" {
+		httpHost = "localhost"
+	}
+	fmt.Printf("Admin UI: http://%s:%d/admin/\n", httpHost, httpPort)
+
 	if gatewayAuth || gatewayToken != "" || gatewayPassword != "" {
 		fmt.Println("Authentication: enabled")
 	}

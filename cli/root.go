@@ -396,6 +396,9 @@ func runStart(cmd *cobra.Command, args []string) {
 		logger.Fatal("Failed to setup agent manager", zap.Error(err))
 	}
 
+	// 注入 AgentManager 到 Admin UI
+	gatewayServer.SetAgentManager(agentManager.AdminAPI())
+
 	// 处理信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

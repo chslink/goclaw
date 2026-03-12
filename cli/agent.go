@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/smallnest/goclaw/agent"
 	"github.com/smallnest/goclaw/agent/tools"
 	"github.com/smallnest/goclaw/bus"
@@ -102,14 +103,14 @@ func runAgent(cmd *cobra.Command, args []string) {
 
 	// Determine workspace based on --agent parameter
 	var workspace string
-	var agentInfo *AgentInfo
+	var agentCfgFile *config.AgentConfig
 	if agentID != "" {
-		agentInfo, err = loadAgentByName(homeDir, agentID)
+		agentCfgFile, err = config.LoadAgentByName(agentID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to load agent '%s': %v\n", agentID, err)
 			os.Exit(1)
 		}
-		workspace = agentInfo.Workspace
+		workspace = agentCfgFile.Workspace
 		if agentVerbose {
 			fmt.Fprintf(os.Stderr, "Using agent '%s' with workspace: %s\n", agentID, workspace)
 		}
@@ -207,6 +208,134 @@ func runAgent(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to register use_skill: %v\n", err)
 	}
 
+	// Register agent_call tool
+	agentCallTool := agent.NewAgentCallTool(messageBus)
+	agentCallTool.SetAgentConfigGetter(func(agentID string) *config.AgentConfig {
+		// First check in main config
+		for _, agentCfg := range cfg.Agents.List {
+			if agentCfg.ID == agentID {
+				return &agentCfg
+			}
+		}
+		// Then try to load from agent config file
+		if loaded, err := config.LoadAgentByName(agentID); err == nil {
+			return loaded
+		}
+		return nil
+	})
+	agentCallTool.SetAgentExistsChecker(func(agentID string) bool {
+		return config.AgentExists(agentID)
+	})
+	// Set callAgent callback to directly call target agent
+	agentCallTool.SetCallAgent(func(ctx context.Context, targetAgentID string, message string) (string, error) {
+		// Load target agent config
+		targetAgentCfg, err := config.LoadAgentByName(targetAgentID)
+		if err != nil {
+			return "", fmt.Errorf("failed to load agent config: %w", err)
+		}
+
+		// Get target agent workspace
+		targetWorkspace := targetAgentCfg.Workspace
+		if targetWorkspace == "" {
+			targetWorkspace = filepath.Join(homeDir, ".goclaw", "workspaces", targetAgentID)
+		}
+
+		// Create target agent memory store and context builder
+		targetMemoryStore := agent.NewMemoryStore(targetWorkspace)
+		targetContextBuilder := agent.NewContextBuilder(targetMemoryStore, targetWorkspace)
+
+		// Create target agent tool registry
+		targetToolRegistry := agent.NewToolRegistry()
+
+		// Register file system tool for target agent
+		targetFsTool := tools.NewFileSystemTool(cfg.Tools.FileSystem.AllowedPaths, cfg.Tools.FileSystem.DeniedPaths, targetWorkspace)
+		for _, tool := range targetFsTool.GetTools() {
+			if err := targetToolRegistry.RegisterExisting(tool); err != nil && agentVerbose {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to register tool %s: %v\n", tool.Name(), err)
+			}
+		}
+
+		// Register shell tool for target agent
+		targetShellTool := tools.NewShellTool(
+			cfg.Tools.Shell.Enabled,
+			cfg.Tools.Shell.AllowedCmds,
+			cfg.Tools.Shell.DeniedCmds,
+			cfg.Tools.Shell.Timeout,
+			cfg.Tools.Shell.WorkingDir,
+			cfg.Tools.Shell.Sandbox,
+		)
+		for _, tool := range targetShellTool.GetTools() {
+			if err := targetToolRegistry.RegisterExisting(tool); err != nil && agentVerbose {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to register tool %s: %v\n", tool.Name(), err)
+			}
+		}
+
+		// Create target agent
+		targetProvider, providerErr := providers.NewProvider(cfg)
+		if providerErr != nil {
+			return "", fmt.Errorf("failed to create target provider: %w", providerErr)
+		}
+		targetAgent, err := agent.NewAgent(&agent.NewAgentConfig{
+			Bus:          messageBus,
+			Provider:     targetProvider,
+			SessionMgr:   sessionMgr,
+			Tools:        targetToolRegistry,
+			Context:      targetContextBuilder,
+			Workspace:    targetWorkspace,
+			MaxIteration: agentMaxIterations,
+			SessionKey:   "agent:" + targetAgentID + ":call",
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create target agent: %w", err)
+		}
+
+		// Subscribe to target agent events
+		eventChan := targetAgent.Subscribe()
+
+		// Start target agent
+		if err := targetAgent.Start(ctx); err != nil {
+			return "", fmt.Errorf("failed to start target agent: %w", err)
+		}
+		defer targetAgent.Stop()
+
+		// Send message to target agent
+		targetInboundMsg := &bus.InboundMessage{
+			ID:        uuid.New().String(),
+			Channel:   "agent_call",
+			SenderID:  agentID,
+			ChatID:    "call",
+			AgentID:   targetAgentID,
+			Content:   message,
+			Timestamp: time.Now(),
+		}
+
+		if err := messageBus.PublishInbound(ctx, targetInboundMsg); err != nil {
+			return "", fmt.Errorf("failed to send message to target agent: %w", err)
+		}
+
+		// Wait for response
+		var response strings.Builder
+		for {
+			select {
+			case <-ctx.Done():
+				return response.String(), nil
+			case event, ok := <-eventChan:
+				if !ok {
+					return response.String(), nil
+				}
+				if event.Type == agent.EventMessageEnd {
+					return response.String(), nil
+				}
+				if event.Type == agent.EventStreamContent {
+					response.WriteString(event.StreamContent)
+				}
+			case <-time.After(60 * time.Second):
+				return response.String(), fmt.Errorf("timeout waiting for target agent response")
+			}
+		}
+	})
+	toolRegistry.RegisterAgentTool(agentCallTool)
+
 	// Create skills loader
 	// 加载顺序（后加载的同名技能会覆盖前面的）：
 	// 1. ./skills/ (当前目录，最高优先级)
@@ -247,7 +376,12 @@ func runAgent(cmd *cobra.Command, args []string) {
 	// Determine session key
 	sessionKey := agentSessionID
 	if sessionKey == "" {
-		sessionKey = agentChannel + ":default"
+		// Format: agent:<agentId>:<chatId> for ParseAgentSessionKey to work correctly
+		if agentID != "" {
+			sessionKey = "agent:" + agentID + ":default"
+		} else {
+			sessionKey = agentChannel + ":default"
+		}
 	}
 
 	// Create new agent first
@@ -259,6 +393,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 		Context:      contextBuilder,
 		Workspace:    workspace,
 		MaxIteration: agentMaxIterations,
+		SessionKey:   sessionKey,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create agent: %v\n", err)
@@ -448,15 +583,3 @@ func deliverResponse(ctx context.Context, messageBus *bus.MessageBus, content st
 	})
 }
 
-// loadAgentByName loads an agent configuration by name
-func loadAgentByName(homeDir, name string) (*AgentInfo, error) {
-	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
-	agentConfigPath := filepath.Join(agentsDir, name+".json")
-
-	agent, err := loadAgent(agentConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("agent '%s' not found: %w", name, err)
-	}
-
-	return agent, nil
-}

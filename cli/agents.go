@@ -15,6 +15,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// agentWorkspace 获取 agent 的工作区路径（内部便捷函数）
+func agentWorkspace(name string) (string, error) {
+	cfg, err := config.LoadAgentByName(name)
+	if err != nil {
+		return "", err
+	}
+	return cfg.Workspace, nil
+}
+
 var agentsCmd = &cobra.Command{
 	Use:   "agents",
 	Short: "Manage isolated agents",
@@ -153,28 +162,9 @@ func init() {
 	agentsCmd.AddCommand(agentsBootstrapCmd)
 }
 
-// AgentInfo represents agent configuration information
-type AgentInfo struct {
-	Name       string            `json:"name"`
-	Workspace  string            `json:"workspace"`
-	Model      string            `json:"model"`
-	AgentDir   string            `json:"agent_dir,omitempty"`
-	Bindings   []string          `json:"bindings,omitempty"`
-	ConfigPath string            `json:"config_path"`
-	CreatedAt  string            `json:"created_at,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-}
-
 // runAgentsList lists all configured agents
 func runAgentsList(cmd *cobra.Command, args []string) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
-	agents, err := loadAgents(agentsDir)
+	agents, err := config.LoadAllAgents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading agents: %v\n", err)
 		os.Exit(1)
@@ -240,15 +230,8 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating agents directory: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Check if agent already exists
-	agentConfigPath := filepath.Join(agentsDir, name+".json")
-	if _, err := os.Stat(agentConfigPath); err == nil {
+	if config.AgentExists(name) {
 		fmt.Fprintf(os.Stderr, "Error: Agent '%s' already exists\n", name)
 		os.Exit(1)
 	}
@@ -274,20 +257,28 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Create agent info
-	agent := &AgentInfo{
+	agentsDir, err := config.AgentsDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting agents directory: %v\n", err)
+		os.Exit(1)
+	}
+	agentConfigPath := filepath.Join(agentsDir, name+".json")
+
+	// Create agent config
+	agentCfg := &config.AgentConfig{
+		ID:         name,
 		Name:       name,
 		Workspace:  workspace,
 		Model:      model,
 		AgentDir:   agentsAddAgentDir,
 		Bindings:   agentsAddBind,
 		ConfigPath: agentConfigPath,
-		Metadata:   make(map[string]string),
+		Metadata:   make(map[string]interface{}),
 	}
 
 	// Save agent configuration
-	if err := saveAgent(agent); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving agent: %v (path: %s)\n", err, agent.ConfigPath)
+	if err := config.SaveAgent(agentCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving agent: %v (path: %s)\n", err, agentCfg.ConfigPath)
 		os.Exit(1)
 	}
 
@@ -298,7 +289,7 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 	}
 
 	if agentsAddJSON {
-		data, err := json.MarshalIndent(agent, "", "  ")
+		data, err := json.MarshalIndent(agentCfg, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
 			os.Exit(1)
@@ -322,13 +313,12 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 func runAgentsDelete(cmd *cobra.Command, args []string) {
 	name := args[0]
 
-	homeDir, err := os.UserHomeDir()
+	agentsDir, err := config.AgentsDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting home directory: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error getting agents directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
 	agentConfigPath := filepath.Join(agentsDir, name+".json")
 
 	// Check if agent exists
@@ -372,103 +362,9 @@ func runAgentsDelete(cmd *cobra.Command, args []string) {
 	}
 }
 
-// loadAgents loads all agent configurations from the agents directory
-func loadAgents(agentsDir string) ([]*AgentInfo, error) {
-	var agents []*AgentInfo
-
-	// Ensure directory exists
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return nil, err
-	}
-
-	// Read directory
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-
-		agentPath := filepath.Join(agentsDir, entry.Name())
-		agent, err := loadAgent(agentPath)
-		if err != nil {
-			// Skip invalid agent files
-			continue
-		}
-		agents = append(agents, agent)
-	}
-
-	return agents, nil
-}
-
-// loadAgent loads a single agent configuration
-func loadAgent(path string) (*AgentInfo, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var agent AgentInfo
-	if err := json.Unmarshal(data, &agent); err != nil {
-		return nil, err
-	}
-
-	agent.ConfigPath = path
-	return &agent, nil
-}
-
-// saveAgent saves an agent configuration
-func saveAgent(agent *AgentInfo) error {
-	// Ensure the directory exists
-	dir := filepath.Dir(agent.ConfigPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create agents directory %s: %w", dir, err)
-	}
-
-	data, err := json.MarshalIndent(agent, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal agent: %w", err)
-	}
-
-	// Use absolute path and ensure it's properly formatted
-	absPath, err := filepath.Abs(agent.ConfigPath)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	if err := os.WriteFile(absPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write file %s: %w", absPath, err)
-	}
-	return nil
-}
-
-// getAgentWorkspace gets the workspace path for an agent
-func getAgentWorkspace(name string) (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	agentsDir := filepath.Join(homeDir, ".goclaw", "agents")
-	agentConfigPath := filepath.Join(agentsDir, name+".json")
-
-	agent, err := loadAgent(agentConfigPath)
-	if err != nil {
-		return "", fmt.Errorf("agent '%s' not found", name)
-	}
-
-	return agent.Workspace, nil
-}
-
 // runAgentsEditFile opens an editor for a specific file in the agent's workspace
 func runAgentsEditFile(filename, name string) {
-	workspacePath, err := getAgentWorkspace(name)
+	workspacePath, err := agentWorkspace(name)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -517,7 +413,7 @@ func runAgentsEditFile(filename, name string) {
 func runAgentsBootstrap(cmd *cobra.Command, args []string) {
 	name := args[0]
 
-	workspacePath, err := getAgentWorkspace(name)
+	workspacePath, err := agentWorkspace(name)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
