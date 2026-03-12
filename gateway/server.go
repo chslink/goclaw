@@ -16,9 +16,11 @@ import (
 	"github.com/smallnest/goclaw/channels"
 	"github.com/smallnest/goclaw/config"
 	"github.com/smallnest/goclaw/cron"
+	"github.com/smallnest/goclaw/gateway/admin"
 	"github.com/smallnest/goclaw/internal/logger"
 	"github.com/smallnest/goclaw/session"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var upgrader = websocket.Upgrader{
@@ -40,6 +42,7 @@ type Server struct {
 	server        *http.Server
 	wsServer      *http.Server
 	handler       *Handler
+	adminHandler  *admin.AdminHandler
 	mu            sync.RWMutex
 	running       bool
 	connections   map[string]*Connection
@@ -99,6 +102,15 @@ func NewServer(cfg *config.Config, messageBus *bus.MessageBus, channelMgr *chann
 		writeTimeout = 10 * time.Second
 	}
 
+	// 创建 AdminHandler
+	adminHandler := admin.NewAdminHandler(cfg, sessionMgr, channelMgr, cronSvc)
+
+	// 注入日志 hook，将日志同时写入 admin 的 Ring Buffer
+	logBuffer := adminHandler.GetLogBuffer()
+	logger.WrapCore(func(core zapcore.Core) zapcore.Core {
+		return admin.NewLogHookCore(core, logBuffer)
+	})
+
 	return &Server{
 		config: cfg,
 		wsConfig: &WebSocketConfig{
@@ -113,12 +125,13 @@ func NewServer(cfg *config.Config, messageBus *bus.MessageBus, channelMgr *chann
 			WriteTimeout:   writeTimeout,
 			MaxMessageSize: 10 * 1024 * 1024, // 10MB
 		},
-		bus:         messageBus,
-		channelMgr:  channelMgr,
-		sessionMgr:  sessionMgr,
-		handler:     NewHandler(messageBus, sessionMgr, channelMgr, cronSvc, acpMgr, cfg),
-		connections: make(map[string]*Connection),
-		acpMgr:      acpMgr,
+		bus:          messageBus,
+		channelMgr:   channelMgr,
+		sessionMgr:   sessionMgr,
+		handler:      NewHandler(messageBus, sessionMgr, channelMgr, cronSvc, acpMgr, cfg),
+		adminHandler: adminHandler,
+		connections:  make(map[string]*Connection),
+		acpMgr:       acpMgr,
 	}
 }
 
@@ -129,6 +142,20 @@ func (s *Server) SetWebSocketConfig(cfg *WebSocketConfig) {
 	s.wsConfig = cfg
 	s.enableAuth = cfg.EnableAuth
 	s.authToken = cfg.AuthToken
+}
+
+// SetAgentManager 延迟注入 AgentManager 到 admin 界面
+func (s *Server) SetAgentManager(mgr admin.AgentManagerAPI) {
+	if s.adminHandler != nil {
+		s.adminHandler.SetAgentManager(mgr)
+	}
+}
+
+// SetSwarmManager 延迟注入 SwarmManager 到 admin 界面
+func (s *Server) SetSwarmManager(mgr admin.SwarmManagerAPI) {
+	if s.adminHandler != nil {
+		s.adminHandler.SetSwarmManager(mgr)
+	}
 }
 
 // Start 启动服务器
@@ -182,6 +209,15 @@ func (s *Server) startHTTPServer(ctx context.Context) error {
 
 	// 通用 webhook 端点
 	mux.HandleFunc("/webhook/", s.handleGenericWebhook)
+
+	// Admin UI 路由
+	if s.adminHandler != nil {
+		s.adminHandler.RegisterRoutes(mux)
+		// 根路径重定向到 Admin UI
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/admin/", http.StatusFound)
+		})
+	}
 
 	// 创建 HTTP 服务器
 	s.server = &http.Server{

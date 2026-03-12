@@ -29,8 +29,23 @@ type WorkspaceConfig struct {
 
 // AgentsConfig Agent 配置
 type AgentsConfig struct {
-	Defaults AgentDefaults `mapstructure:"defaults" json:"defaults"`
-	List     []AgentConfig `mapstructure:"list" json:"list"`
+	Defaults      AgentDefaults        `mapstructure:"defaults" json:"defaults"`
+	List          []AgentConfig        `mapstructure:"list" json:"list"`
+	DecisionAgent *DecisionAgentConfig `mapstructure:"decision_agent" json:"decision_agent"`
+}
+
+// DecisionAgentConfig 决策Agent配置（轻量级LLM决策组件）
+type DecisionAgentConfig struct {
+	Enabled        bool     `mapstructure:"enabled" json:"enabled"`
+	Provider       string   `mapstructure:"provider" json:"provider"`               // openai/anthropic/openrouter
+	Model          string   `mapstructure:"model" json:"model"`                     // e.g. "gemini-2.0-flash"
+	APIKey         string   `mapstructure:"api_key" json:"api_key"`                 // 可选，默认复用主provider
+	BaseURL        string   `mapstructure:"base_url" json:"base_url"`               // 可选
+	TimeoutMs      int      `mapstructure:"timeout_ms" json:"timeout_ms"`           // 单次调用超时，默认2000
+	MaxTokens      int      `mapstructure:"max_tokens" json:"max_tokens"`           // 默认256
+	Temperature    float64  `mapstructure:"temperature" json:"temperature"`         // 默认0.1
+	FallbackOnFail bool     `mapstructure:"fallback_on_fail" json:"fallback_on_fail"` // 默认true
+	EnabledTypes   []string `mapstructure:"enabled_types" json:"enabled_types"`     // 启用的决策类型
 }
 
 // AgentDefaults Agent 默认配置
@@ -62,6 +77,12 @@ type AgentSubagentConfig struct {
 	AllowTools     []string `mapstructure:"allow_tools" json:"allow_tools"`
 }
 
+// AgentCallConfig Agent 间调用配置
+type AgentCallConfig struct {
+	AllowAgents []string `mapstructure:"allow_agents" json:"allow_agents"` // 允许调用的 agent 列表，["*"] 表示所有
+	Timeout     int      `mapstructure:"timeout" json:"timeout"`           // 默认超时时间(秒)
+}
+
 // AgentConfig Agent 配置
 type AgentConfig struct {
 	ID           string                 `mapstructure:"id" json:"id"`                       // Agent 唯一ID
@@ -73,6 +94,13 @@ type AgentConfig struct {
 	SystemPrompt string                 `mapstructure:"system_prompt" json:"system_prompt"` // 系统提示词
 	Metadata     map[string]interface{} `mapstructure:"metadata" json:"metadata"`           // 额外元数据
 	Subagents    *AgentSubagentConfig   `mapstructure:"subagents" json:"subagents"`         // 分身配置
+	AgentCall    *AgentCallConfig       `mapstructure:"agent_call" json:"agent_call"`       // Agent 间调用配置
+
+	// CLI 管理字段（磁盘文件 ~/.goclaw/agents/<name>.json 使用）
+	AgentDir   string   `mapstructure:"agent_dir" json:"agent_dir,omitempty"`     // Agent 定义目录
+	Bindings   []string `mapstructure:"bindings" json:"bindings,omitempty"`       // 通道绑定列表
+	ConfigPath string   `mapstructure:"config_path" json:"config_path,omitempty"` // 配置文件路径
+	CreatedAt  string   `mapstructure:"created_at" json:"created_at,omitempty"`   // 创建时间
 }
 
 // AgentIdentity Agent 身份配置
@@ -169,7 +197,7 @@ type FeishuChannelConfig struct {
 	DMPolicy          string   `mapstructure:"dm_policy" json:"dm_policy"`       // 私聊策略: open, pairing, allowlist, closed (默认: pairing)
 	AllowedIDs        []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// CronOutputChatID 指定 cron 任务输出的目标聊天 ID（用于接收定时任务的通知）
-	CronOutputChatID  string   `mapstructure:"cron_output_chat_id" json:"cron_output_chat_id"`
+	CronOutputChatID string `mapstructure:"cron_output_chat_id" json:"cron_output_chat_id"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }
@@ -225,7 +253,7 @@ type GotifyChannelConfig struct {
 	Enabled    bool     `mapstructure:"enabled" json:"enabled"`
 	ServerURL  string   `mapstructure:"server_url" json:"server_url"`
 	AppToken   string   `mapstructure:"app_token" json:"app_token"`
-	Priority   int      `mapstructure:"priority" json:"priority"`   // 消息优先级 1-10
+	Priority   int      `mapstructure:"priority" json:"priority"` // 消息优先级 1-10
 	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
@@ -233,15 +261,15 @@ type GotifyChannelConfig struct {
 
 // WeiboChannelConfig 微博通道配置
 type WeiboChannelConfig struct {
-	Enabled       bool     `mapstructure:"enabled" json:"enabled"`
-	AppID         string   `mapstructure:"app_id" json:"app_id"`                     // 微博 App ID
-	AppSecret     string   `mapstructure:"app_secret" json:"app_secret"`             // 微博 App Secret
-	WSEndpoint    string   `mapstructure:"ws_endpoint" json:"ws_endpoint"`           // WebSocket 服务地址
-	TokenEndpoint string   `mapstructure:"token_endpoint" json:"token_endpoint"`     // Token 服务地址
-	DMPolicy      string   `mapstructure:"dm_policy" json:"dm_policy"`               // 私信策略: open, pairing, closed
-	AllowFrom     []string `mapstructure:"allow_from" json:"allow_from"`             // 允许发送私信的用户 ID 列表
-	TextChunkLimit int     `mapstructure:"text_chunk_limit" json:"text_chunk_limit"` // 单条消息最大字符数
-	ChunkMode     string   `mapstructure:"chunk_mode" json:"chunk_mode"`             // 分片模式: length, newline, raw
+	Enabled        bool     `mapstructure:"enabled" json:"enabled"`
+	AppID          string   `mapstructure:"app_id" json:"app_id"`                     // 微博 App ID
+	AppSecret      string   `mapstructure:"app_secret" json:"app_secret"`             // 微博 App Secret
+	WSEndpoint     string   `mapstructure:"ws_endpoint" json:"ws_endpoint"`           // WebSocket 服务地址
+	TokenEndpoint  string   `mapstructure:"token_endpoint" json:"token_endpoint"`     // Token 服务地址
+	DMPolicy       string   `mapstructure:"dm_policy" json:"dm_policy"`               // 私信策略: open, pairing, closed
+	AllowFrom      []string `mapstructure:"allow_from" json:"allow_from"`             // 允许发送私信的用户 ID 列表
+	TextChunkLimit int      `mapstructure:"text_chunk_limit" json:"text_chunk_limit"` // 单条消息最大字符数
+	ChunkMode      string   `mapstructure:"chunk_mode" json:"chunk_mode"`             // 分片模式: length, newline, raw
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }
@@ -460,4 +488,54 @@ type ThreadBindingConfig struct {
 	SpawnEnabled  bool `mapstructure:"spawn_enabled" json:"spawn_enabled"`     // 是否允许通过 spawn 创建绑定
 	IdleTimeoutMs int  `mapstructure:"idle_timeout_ms" json:"idle_timeout_ms"` // 空闲超时 (毫秒)
 	MaxAgeMs      int  `mapstructure:"max_age_ms" json:"max_age_ms"`           // 最大存活时间 (毫秒)
+}
+
+// CorporateSwarmConfig 公司化蜂群配置
+type CorporateSwarmConfig struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Mode        string              `json:"mode"` // "corporate"
+	Secretary   CorporateRoleConfig `json:"secretary"`
+	HR          CorporateRoleConfig `json:"hr"`
+	PM          CorporateRoleConfig `json:"pm"`
+	WorkerPool  WorkerPoolConfig    `json:"worker_pool"`
+	Approval    ApprovalFlowConfig  `json:"approval"`
+	Reporting   ReportingConfig     `json:"reporting"`
+}
+
+// CorporateRoleConfig 公司化角色配置
+type CorporateRoleConfig struct {
+	AgentID   string   `json:"agent_id"`
+	Model     string   `json:"model"`
+	DenyTools []string `json:"deny_tools"`
+}
+
+// WorkerPoolConfig Worker 池配置
+type WorkerPoolConfig struct {
+	MaxConcurrent       int                    `json:"max_concurrent"`
+	ArchiveAfterMinutes int                    `json:"archive_after_minutes"`
+	DefaultModel        string                 `json:"default_model"`
+	Templates           []WorkerTemplateConfig `json:"templates"`
+}
+
+// WorkerTemplateConfig Worker 模板配置
+type WorkerTemplateConfig struct {
+	Role       string   `json:"role"`
+	Name       string   `json:"name"`
+	Model      string   `json:"model"`
+	AllowTools []string `json:"allow_tools"`
+	DenyTools  []string `json:"deny_tools"`
+}
+
+// ApprovalFlowConfig 审批流程配置
+type ApprovalFlowConfig struct {
+	Enabled          bool `json:"enabled"`
+	TimeoutMinutes   int  `json:"timeout_minutes"`
+	AutoApproveBelow int  `json:"auto_approve_below"`
+}
+
+// ReportingConfig 汇报配置
+type ReportingConfig struct {
+	IntervalMinutes int    `json:"interval_minutes"`
+	DetailLevel     string `json:"detail_level"`
 }
