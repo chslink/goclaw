@@ -1,21 +1,21 @@
-# OpenClaw + Kiro CLI 编程代理技能
+# GoClaw + Kiro CLI 编程代理技能
 
 [English](./README.md)
 
-> 将 [Kiro CLI](https://kiro.dev/)（AWS AI 编程助手）与 [OpenClaw](https://github.com/openclaw/openclaw) 集成，实现无缝的 AI 编程工作流。
+> 将 [Kiro CLI](https://kiro.dev/)（AWS AI 编程助手）与 [GoClaw](https://github.com/smallnest/goclaw) 集成，实现无缝的 AI 编程工作流。
 
 ## 这是什么？
 
-本仓库提供了一个用于 OpenClaw 的 **coding-agent skill**，支持与 Kiro CLI 及其他编程代理（Codex、Claude Code、OpenCode、Pi）的集成。该 skill 让 OpenClaw 能够：
+本仓库提供了一个用于 GoClaw 的 **coding-agent skill**，支持与 Kiro CLI 及其他编程代理（Codex、Claude Code、OpenCode、Pi）的集成。该 skill 让 GoClaw 能够：
 
 - 在后台启动和管理编程代理
 - 处理与交互式 CLI 的多轮对话
 - 监控进度并捕获输出
 - 通过聊天界面（WhatsApp、Discord、Telegram 等）协调编程任务
 
-## 什么是 OpenClaw？
+## 什么是 GoClaw？
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个开源 AI 助手框架，可连接各种消息平台：
+[GoClaw](https://github.com/smallnest/goclaw) 是一个开源 AI 助手框架，可连接各种消息平台：
 
 - 作为个人 AI 助手运行在 WhatsApp、Discord、Telegram、Signal 等平台
 - 执行 shell 命令、浏览网页、管理文件
@@ -33,9 +33,9 @@
 
 ## 安装
 
-### 1. 安装 OpenClaw
+### 1. 安装 GoClaw
 
-参考 [OpenClaw 安装指南](https://docs.openclaw.ai/)。
+参考 [GoClaw 安装指南](https://docs.openclaw.ai/)。
 
 ### 2. 安装 Kiro CLI
 
@@ -50,23 +50,23 @@ curl -fsSL https://cli.kiro.dev/install | bash
 
 ### 3. 添加 Skill
 
-将 `SKILL.md` 复制到 OpenClaw 工作区的 skills 目录：
+将 `SKILL.md` 复制到 GoClaw 工作区的 skills 目录：
 
 ```bash
-mkdir -p ~/.openclaw/workspace/skills/coding-agent
-cp SKILL.md ~/.openclaw/workspace/skills/coding-agent/
+mkdir -p ~/.goclaw/workspace/skills/coding-agent
+cp SKILL.md ~/.goclaw/workspace/skills/coding-agent/
 ```
 
 或直接克隆本仓库：
 
 ```bash
-cd ~/.openclaw/workspace/skills
+cd ~/.goclaw/workspace/skills
 git clone https://github.com/terrificdm/openclaw-kirocli-coding-agent.git coding-agent
 ```
 
 ## 使用方法
 
-安装完成后，你可以让 OpenClaw 使用 Kiro CLI 执行编程任务。
+安装完成后，你可以让 GoClaw 使用 Kiro CLI 执行编程任务。
 
 > **注意：** 在消息中使用魔法词 **"kiro"** 来激活 Kiro CLI。例如："用 **kiro** 帮我..." 或 "让 **kiro** 查一下..."
 
@@ -77,7 +77,7 @@ git clone https://github.com/terrificdm/openclaw-kirocli-coding-agent.git coding
 "让 kiro 列出项目中所有的 TODO 注释"
 ```
 
-OpenClaw 会运行：
+GoClaw 会运行：
 ```bash
 kiro-cli chat --no-interactive --trust-all-tools "你的查询"
 ```
@@ -90,7 +90,7 @@ kiro-cli chat --no-interactive --trust-all-tools "你的查询"
 "让 kiro 创建项目结构"
 ```
 
-OpenClaw 使用后台进程管理会话：
+GoClaw 使用后台进程管理会话：
 ```bash
 # 启动交互式会话
 exec pty:true background:true command:"kiro-cli chat --trust-all-tools"
@@ -148,18 +148,18 @@ Plan Agent 会：
 ```
 用户: "用 kiro 帮我重构 auth 模块"
 
-OpenClaw: 正在启动 Kiro 会话进行 auth 重构...
+GoClaw: 正在启动 Kiro 会话进行 auth 重构...
          [启动: kiro-cli chat --trust-all-tools]
 
 用户: "我想从 JWT 切换到基于 session 的认证"
 
-OpenClaw: [发送消息到 Kiro 会话]
+GoClaw: [发送消息到 Kiro 会话]
          Kiro 说: "我来帮你从 JWT 迁移到基于 session 的认证。
          让我先分析一下你当前的实现..."
          
 用户: "可以开始修改了"
 
-OpenClaw: [发送批准到 Kiro]
+GoClaw: [发送批准到 Kiro]
          Kiro 正在进行修改... 完成后我会通知你。
 ```
 
@@ -169,6 +169,6 @@ MIT
 
 ## 链接
 
-- [OpenClaw](https://github.com/openclaw/openclaw)
+- [GoClaw](https://github.com/smallnest/goclaw)
 - [Kiro CLI](https://kiro.dev/)
-- [OpenClaw 文档](https://docs.openclaw.ai/)
+- [GoClaw 文档](https://docs.openclaw.ai/)

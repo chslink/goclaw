@@ -219,3 +219,102 @@ goclaw agents list
 复制以下目录：
 - `~/.goclaw/agents/<name>.json`
 - `~/.goclaw/workspaces/<name>/`
+
+## Swarm 动态 Agent 管理
+
+蜂群运行时可以动态添加或移除 agent，无需重启。CLI 命令通过 Admin HTTP API 与运行中的蜂群进程通信。
+
+### 前提条件
+
+蜂群必须已经在运行（`goclaw swarm start <name>`），且 gateway 已启动。
+
+### 向蜂群添加 Agent
+
+```bash
+goclaw swarm add-agent <agent-id> [options]
+```
+
+选项：
+- `--workspace <path>` - 指定工作区目录（可选，默认 `~/.goclaw/workspaces/<agent-id>`）
+- `--model <model>` - 指定使用的模型（可选）
+- `--port <port>` - Admin API 端口（默认 28789）
+
+两种添加方式：
+1. **从磁盘配置加载**：仅指定 agent-id，配置从 `~/.goclaw/agents/<agent-id>.json` 加载
+2. **运行时创建**：指定 `--workspace` 或 `--model`，无需磁盘配置文件
+
+示例：
+```bash
+# 从磁盘配置加载已有 agent
+goclaw swarm add-agent my-worker
+
+# 运行时创建全新 agent
+goclaw swarm add-agent temp-agent --workspace /tmp/temp --model gpt-4
+
+# 指定自定义端口
+goclaw swarm add-agent my-worker --port 18080
+```
+
+**Corporate 模式**：添加的 agent 作为 worker 角色加入，不能与管理层（secretary/hr/pm）ID 冲突。Worker 可以调用所有管理层 agent。
+
+### 从蜂群移除 Agent
+
+```bash
+goclaw swarm remove-agent <agent-id> [options]
+```
+
+选项：
+- `--port <port>` - Admin API 端口（默认 28789）
+
+示例：
+```bash
+goclaw swarm remove-agent old-worker
+goclaw swarm remove-agent old-worker --port 18080
+```
+
+**Corporate 模式**：不能移除管理层角色（secretary/hr/pm），只能移除动态 worker。
+
+### Admin HTTP API
+
+如果需要通过编程方式管理，可以直接调用 Admin API：
+
+**添加 Agent**
+```
+POST http://localhost:28789/admin/api/swarms/agents
+Content-Type: application/json
+
+{
+  "agent_id": "new-worker",
+  "workspace": "/optional/path",
+  "model": "gpt-4"
+}
+```
+- `agent_id`（必填）：Agent ID
+- `workspace`（可选）：工作区路径，为空则使用默认路径
+- `model`（可选）：模型名称
+
+**移除 Agent**
+```
+DELETE http://localhost:28789/admin/api/swarms/agents/{agent-id}
+```
+
+响应均返回操作结果和当前 agent 列表。
+
+### Swarm 动态管理工作流示例
+
+```bash
+# 终端 A：启动蜂群
+goclaw swarm start myswarm
+
+# 终端 B：查看状态
+goclaw swarm status myswarm
+
+# 终端 B：动态添加 agent
+goclaw swarm add-agent new-worker
+
+# 终端 B：确认 agent 已加入
+goclaw swarm status myswarm
+
+# 终端 B：移除 agent
+goclaw swarm remove-agent new-worker
+```

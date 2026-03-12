@@ -1,21 +1,21 @@
-# OpenClaw + Kiro CLI Coding Agent Skill
+# GoClaw + Kiro CLI Coding Agent Skill
 
 [中文文档](./README.zh-CN.md)
 
-> Integrate [Kiro CLI](https://kiro.dev/) (AWS AI coding assistant) with [OpenClaw](https://github.com/openclaw/openclaw) for seamless AI-powered coding workflows.
+> Integrate [Kiro CLI](https://kiro.dev/) (AWS AI coding assistant) with [GoClaw](https://github.com/smallnest/goclaw) for seamless AI-powered coding workflows.
 
 ## What is This?
 
-This repository provides a **coding-agent skill** for OpenClaw that enables integration with Kiro CLI and other coding agents (Codex, Claude Code, OpenCode, Pi). The skill teaches OpenClaw how to:
+This repository provides a **coding-agent skill** for GoClaw that enables integration with Kiro CLI and other coding agents (Codex, Claude Code, OpenCode, Pi). The skill teaches GoClaw how to:
 
 - Launch and manage coding agents in the background
 - Handle multi-turn conversations with interactive CLIs
 - Monitor progress and capture outputs
 - Coordinate coding tasks through chat interfaces (WhatsApp, Discord, Telegram, etc.)
 
-## What is OpenClaw?
+## What is GoClaw?
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an open-source AI assistant framework that connects to various messaging platforms. It can:
+[GoClaw](https://github.com/smallnest/goclaw) is an open-source AI assistant framework that connects to various messaging platforms. It can:
 
 - Run as a personal AI assistant across WhatsApp, Discord, Telegram, Signal, etc.
 - Execute shell commands, browse the web, manage files
@@ -33,9 +33,9 @@ This repository provides a **coding-agent skill** for OpenClaw that enables inte
 
 ## Installation
 
-### 1. Install OpenClaw
+### 1. Install GoClaw
 
-Follow the [OpenClaw installation guide](https://docs.openclaw.ai/).
+Follow the [GoClaw installation guide](https://docs.openclaw.ai/).
 
 ### 2. Install Kiro CLI
 
@@ -50,23 +50,23 @@ After installation, run `kiro-cli login` to authenticate (supports GitHub, Googl
 
 ### 3. Add the Skill
 
-Copy `SKILL.md` to your OpenClaw workspace skills directory:
+Copy `SKILL.md` to your GoClaw workspace skills directory:
 
 ```bash
-mkdir -p ~/.openclaw/workspace/skills/coding-agent
-cp SKILL.md ~/.openclaw/workspace/skills/coding-agent/
+mkdir -p ~/.goclaw/workspace/skills/coding-agent
+cp SKILL.md ~/.goclaw/workspace/skills/coding-agent/
 ```
 
 Or clone this repo directly:
 
 ```bash
-cd ~/.openclaw/workspace/skills
+cd ~/.goclaw/workspace/skills
 git clone https://github.com/terrificdm/openclaw-kirocli-coding-agent.git coding-agent
 ```
 
 ## Usage
 
-Once installed, you can ask OpenClaw to use Kiro CLI for coding tasks.
+Once installed, you can ask GoClaw to use Kiro CLI for coding tasks.
 
 > **Note:** Use the magic word **"kiro"** in your message to activate Kiro CLI. For example: "Use **kiro** to..." or "Ask **kiro** to..."
 
@@ -77,7 +77,7 @@ Once installed, you can ask OpenClaw to use Kiro CLI for coding tasks.
 "Ask kiro to list all TODO comments in my project"
 ```
 
-OpenClaw will run:
+GoClaw will run:
 ```bash
 kiro-cli chat --no-interactive --trust-all-tools "your query"
 ```
@@ -90,7 +90,7 @@ kiro-cli chat --no-interactive --trust-all-tools "your query"
 "Ask kiro to create the project structure"
 ```
 
-OpenClaw manages the session using background processes:
+GoClaw manages the session using background processes:
 ```bash
 # Start interactive session
 exec pty:true background:true command:"kiro-cli chat --trust-all-tools"
@@ -148,18 +148,18 @@ Plan Agent will:
 ```
 User: "Use kiro to help me refactor the auth module"
 
-OpenClaw: Starting Kiro session for auth refactoring...
+GoClaw: Starting Kiro session for auth refactoring...
          [Launches: kiro-cli chat --trust-all-tools]
 
 User: "I want to switch from JWT to session-based auth"
 
-OpenClaw: [Sends message to Kiro session]
+GoClaw: [Sends message to Kiro session]
          Kiro says: "I'll help you migrate from JWT to session-based 
          authentication. Let me first analyze your current implementation..."
          
 User: "Go ahead with the changes"
 
-OpenClaw: [Sends approval to Kiro]
+GoClaw: [Sends approval to Kiro]
          Kiro is making changes... I'll notify you when done.
 ```
 
@@ -169,6 +169,6 @@ MIT
 
 ## Links
 
-- [OpenClaw](https://github.com/openclaw/openclaw)
+- [GoClaw](https://github.com/smallnest/goclaw)
 - [Kiro CLI](https://kiro.dev/)
-- [OpenClaw Documentation](https://docs.openclaw.ai/)
+- [GoClaw Documentation](https://docs.openclaw.ai/)

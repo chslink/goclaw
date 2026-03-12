@@ -120,7 +120,7 @@ bash pty:true workdir:~/project background:true command:"codex --yolo 'Refactor 
 
 ### Reviewing PRs
 
-**⚠️ CRITICAL: Never review PRs in OpenClaw's own project folder!**
+**⚠️ CRITICAL: Never review PRs in GoClaw's own project folder!**
 Clone to temp folder or use git worktree.
 
 ```bash
@@ -199,7 +199,7 @@ kiro-cli chat --no-interactive --trust-tools "fs_read,fs_write" "Read package.js
 
 **🔐 Tool Trust:** Use `--trust-all-tools` for automation (default). For untrusted input or sensitive systems, consider `--trust-tools "fs_read,fs_write,shell"` to limit scope.
 
-### OpenClaw Integration
+### GoClaw Integration
 
 ```bash
 # Interactive session (background)
@@ -362,7 +362,7 @@ git worktree remove /tmp/issue-99
 7. **--no-interactive for Kiro one-shots** - single response mode
 8. **Parallel is OK** - run many agent processes at once for batch work
 9. **NEVER start agents in ~/clawd/** - it'll read your soul docs and get weird ideas about the org chart!
-10. **NEVER checkout branches in ~/Projects/openclaw/** - that's the LIVE OpenClaw instance!
+10. **NEVER checkout branches in ~/Projects/goclaw/** - that's the LIVE GoClaw instance!
 11. **Suggest Kiro /plan for complex tasks** - when requirements are unclear or task is multi-step, suggest Plan Agent to user and let them decide
 
 ---
@@ -385,13 +385,13 @@ This prevents the user from seeing only "Agent failed before reply" and having n
 
 ## Auto-Notify on Completion
 
-For long-running background tasks, append a wake trigger to your prompt so OpenClaw gets notified immediately when the agent finishes (instead of waiting for the next heartbeat):
+For long-running background tasks, append a wake trigger to your prompt so GoClaw gets notified immediately when the agent finishes (instead of waiting for the next heartbeat):
 
 ```
 ... your task here.
 
 When completely finished, run this command to notify me:
-openclaw gateway wake --text "Done: [brief summary of what was built]" --mode now
+goclaw gateway wake --text "Done: [brief summary of what was built]" --mode now
 ```
 
 **Example (Codex):**
@@ -399,7 +399,7 @@ openclaw gateway wake --text "Done: [brief summary of what was built]" --mode no
 ```bash
 bash pty:true workdir:~/project background:true command:"codex --yolo exec 'Build a REST API for todos.
 
-When completely finished, run: openclaw gateway wake --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
+When completely finished, run: goclaw gateway wake --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
 ```
 
 This triggers an immediate wake event — gets pinged in seconds, not 10 minutes.
