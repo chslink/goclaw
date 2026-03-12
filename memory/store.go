@@ -134,11 +134,15 @@ func (s *SQLiteStore) initSchema(config StoreConfig) error {
 			tags TEXT,
 			importance REAL DEFAULT 0.5,
 			access_count INTEGER DEFAULT 0,
-			last_accessed INTEGER
+			last_accessed INTEGER,
+			agent_id TEXT DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create memories table: %w", err)
 	}
+
+	// Migrate: add agent_id column if missing (for existing databases)
+	s.migrateSchema()
 
 	// Create indexes for common queries
 	if _, err := s.db.Exec(`
@@ -160,6 +164,13 @@ func (s *SQLiteStore) initSchema(config StoreConfig) error {
 		ON memories(created_at)
 	`); err != nil {
 		return fmt.Errorf("failed to create created_at index: %w", err)
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_memories_agent_id
+		ON memories(agent_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create agent_id index: %w", err)
 	}
 
 	// Enable vector search if configured
@@ -256,6 +267,36 @@ func (s *SQLiteStore) initFTS() error {
 	return nil
 }
 
+// migrateSchema checks for missing columns and adds them (for existing databases)
+func (s *SQLiteStore) migrateSchema() {
+	// Check if agent_id column exists
+	rows, err := s.db.Query("PRAGMA table_info(memories)")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	hasAgentID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		if name == "agent_id" {
+			hasAgentID = true
+		}
+	}
+
+	if !hasAgentID {
+		_, _ = s.db.Exec("ALTER TABLE memories ADD COLUMN agent_id TEXT DEFAULT ''")
+		_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id)")
+	}
+}
+
 // setMeta stores a key-value pair in the metadata table
 func (s *SQLiteStore) setMeta(key, value string) {
 	now := time.Now().Unix()
@@ -311,14 +352,15 @@ func (s *SQLiteStore) Add(embedding *VectorEmbedding) error {
 		INSERT INTO memories (
 			id, text, source, type, embedding, dimension,
 			created_at, updated_at, file_path, line_number,
-			session_key, tags, importance, access_count, last_accessed
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			session_key, tags, importance, access_count, last_accessed,
+			agent_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, embedding.ID, embedding.Text, embedding.Source, embedding.Type,
 		embeddingJSON, len(embedding.Vector), embedding.CreatedAt.Unix(),
 		embedding.UpdatedAt.Unix(), embedding.Metadata.FilePath,
 		embedding.Metadata.LineNumber, embedding.Metadata.SessionKey,
 		tagsJSON, embedding.Metadata.Importance, embedding.Metadata.AccessCount,
-		embedding.Metadata.LastAccessed.Unix())
+		embedding.Metadata.LastAccessed.Unix(), embedding.Metadata.AgentID)
 
 	if err != nil {
 		return fmt.Errorf("failed to insert memory: %w", err)
@@ -360,8 +402,9 @@ func (s *SQLiteStore) AddBatch(embeddings []*VectorEmbedding) error {
 		INSERT INTO memories (
 			id, text, source, type, embedding, dimension,
 			created_at, updated_at, file_path, line_number,
-			session_key, tags, importance, access_count, last_accessed
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			session_key, tags, importance, access_count, last_accessed,
+			agent_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -395,7 +438,7 @@ func (s *SQLiteStore) AddBatch(embeddings []*VectorEmbedding) error {
 			emb.UpdatedAt.Unix(), emb.Metadata.FilePath,
 			emb.Metadata.LineNumber, emb.Metadata.SessionKey,
 			tagsJSON, emb.Metadata.Importance, emb.Metadata.AccessCount,
-			emb.Metadata.LastAccessed.Unix(),
+			emb.Metadata.LastAccessed.Unix(), emb.Metadata.AgentID,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert memory %s: %w", emb.ID, err)
@@ -586,9 +629,201 @@ func (s *SQLiteStore) searchVector(query []float32, opts SearchOptions) ([]*Sear
 
 // searchFTS performs full-text search
 func (s *SQLiteStore) searchFTS(query []float32, opts SearchOptions) ([]*SearchResult, error) {
-	// For now, this is a placeholder
-	// In a full implementation, we'd convert the vector to text or use a separate text query
+	// For now, this is a placeholder — vector-to-text FTS is not meaningful
+	// Use SearchByText() for text-based FTS queries
 	return []*SearchResult{}, nil
+}
+
+// SearchByText performs full-text search using FTS5 or fallback substring matching
+func (s *SQLiteStore) SearchByText(query string, opts SearchOptions) ([]*SearchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if query == "" {
+		return nil, fmt.Errorf("query text is empty")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var results []*SearchResult
+
+	if s.isFTSEnabled() {
+		// Use FTS5 for text search
+		querySQL := `
+			SELECT
+				m.id, m.text, m.source, m.type,
+				m.created_at, m.updated_at,
+				m.file_path, m.line_number, m.session_key,
+				m.tags, m.importance, m.access_count, m.last_accessed,
+				m.agent_id,
+				rank
+			FROM memory_fts f
+			JOIN memories m ON m.id = f.id
+			WHERE memory_fts MATCH ?
+		`
+		args := []interface{}{query}
+
+		if opts.AgentID != "" {
+			querySQL += " AND m.agent_id = ?"
+			args = append(args, opts.AgentID)
+		}
+
+		querySQL += " ORDER BY rank LIMIT ?"
+		args = append(args, limit)
+
+		rows, err := s.db.Query(querySQL, args...)
+		if err != nil {
+			// FTS query failed, fall through to substring search
+			return s.searchBySubstring(query, opts)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			sr, err := s.scanSearchResultWithAgentID(rows)
+			if err != nil {
+				continue
+			}
+			// Normalize FTS rank to 0-1 score (rank is negative, more negative = better match)
+			sr.Score = 1.0 / (1.0 - sr.Score)
+			sr.TextScore = sr.Score
+			results = append(results, sr)
+		}
+
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+
+	// Fallback: substring search
+	return s.searchBySubstring(query, opts)
+}
+
+// searchBySubstring performs a simple LIKE-based text search
+func (s *SQLiteStore) searchBySubstring(query string, opts SearchOptions) ([]*SearchResult, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	querySQL := `
+		SELECT
+			id, text, source, type,
+			created_at, updated_at,
+			file_path, line_number, session_key,
+			tags, importance, access_count, last_accessed,
+			agent_id
+		FROM memories
+		WHERE text LIKE ?
+	`
+	args := []interface{}{"%" + query + "%"}
+
+	if opts.AgentID != "" {
+		querySQL += " AND agent_id = ?"
+		args = append(args, opts.AgentID)
+	}
+
+	querySQL += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.Query(querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("substring search failed: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*SearchResult
+	for rows.Next() {
+		var sr SearchResult
+		var tagsJSON sql.NullString
+		var lastAccessed sql.NullInt64
+		var filePath sql.NullString
+		var sessionKey sql.NullString
+		var lineNumber sql.NullInt64
+		var importance sql.NullFloat64
+		var accessCount sql.NullInt64
+		var agentID sql.NullString
+		var createdAt, updatedAt int64
+
+		err := rows.Scan(
+			&sr.ID, &sr.Text, &sr.Source, &sr.Type,
+			&createdAt, &updatedAt,
+			&filePath, &lineNumber, &sessionKey,
+			&tagsJSON, &importance, &accessCount, &lastAccessed,
+			&agentID,
+		)
+		if err != nil {
+			continue
+		}
+
+		sr.CreatedAt = time.Unix(createdAt, 0)
+		sr.UpdatedAt = time.Unix(updatedAt, 0)
+		sr.Metadata.FilePath = filePath.String
+		sr.Metadata.LineNumber = int(lineNumber.Int64)
+		sr.Metadata.SessionKey = sessionKey.String
+		sr.Metadata.Importance = importance.Float64
+		sr.Metadata.AccessCount = int(accessCount.Int64)
+		sr.Metadata.AgentID = agentID.String
+
+		if lastAccessed.Valid {
+			sr.Metadata.LastAccessed = time.Unix(lastAccessed.Int64, 0)
+		}
+		if tagsJSON.Valid {
+			_ = json.Unmarshal([]byte(tagsJSON.String), &sr.Metadata.Tags)
+		}
+
+		sr.Score = 0.5 // Default score for substring match
+		sr.TextScore = 0.5
+		results = append(results, &sr)
+	}
+
+	return results, nil
+}
+
+// scanSearchResultWithAgentID scans a row into SearchResult including agent_id and rank
+func (s *SQLiteStore) scanSearchResultWithAgentID(rows *sql.Rows) (*SearchResult, error) {
+	var sr SearchResult
+	var tagsJSON sql.NullString
+	var lastAccessed sql.NullInt64
+	var filePath sql.NullString
+	var sessionKey sql.NullString
+	var lineNumber sql.NullInt64
+	var importance sql.NullFloat64
+	var accessCount sql.NullInt64
+	var agentID sql.NullString
+	var createdAt, updatedAt int64
+
+	err := rows.Scan(
+		&sr.ID, &sr.Text, &sr.Source, &sr.Type,
+		&createdAt, &updatedAt,
+		&filePath, &lineNumber, &sessionKey,
+		&tagsJSON, &importance, &accessCount, &lastAccessed,
+		&agentID,
+		&sr.Score,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	sr.CreatedAt = time.Unix(createdAt, 0)
+	sr.UpdatedAt = time.Unix(updatedAt, 0)
+	sr.Metadata.FilePath = filePath.String
+	sr.Metadata.LineNumber = int(lineNumber.Int64)
+	sr.Metadata.SessionKey = sessionKey.String
+	sr.Metadata.Importance = importance.Float64
+	sr.Metadata.AccessCount = int(accessCount.Int64)
+	sr.Metadata.AgentID = agentID.String
+
+	if lastAccessed.Valid {
+		sr.Metadata.LastAccessed = time.Unix(lastAccessed.Int64, 0)
+	}
+	if tagsJSON.Valid {
+		_ = json.Unmarshal([]byte(tagsJSON.String), &sr.Metadata.Tags)
+	}
+
+	return &sr, nil
 }
 
 // mergeHybridResults combines vector and FTS results

@@ -25,8 +25,8 @@ type MemorySearchManager interface {
 
 // BuiltinSearchManager builtin 后端实现
 type BuiltinSearchManager struct {
-	manager *MemoryManager
-	dbPath  string
+	store  Store  // 直接持有 store（不再依赖 MemoryManager）
+	dbPath string
 }
 
 // QMDSearchManager QMD 后端实现
@@ -55,40 +55,33 @@ func NewBuiltinSearchManager(cfg config.MemoryConfig, workspace string) (MemoryS
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// 创建存储
+	// 创建存储（无 provider，使用 FTS 文本搜索）
 	storeConfig := DefaultStoreConfig(dbPath, nil)
 	store, err := NewSQLiteStore(storeConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open memory store: %w", err)
 	}
 
-	// 创建管理器（不使用 provider，仅用于元数据）
-	managerConfig := ManagerConfig{
-		Store:        store,
-		Provider:     nil, // QMD 模式下不需要本地 provider
-		CacheMaxSize: 1000,
-	}
-	manager, err := NewMemoryManager(managerConfig)
-	if err != nil {
-		store.Close()
-		return nil, fmt.Errorf("failed to create memory manager: %w", err)
-	}
-
 	return &BuiltinSearchManager{
-		manager: manager,
-		dbPath:  dbPath,
+		store:  store,
+		dbPath: dbPath,
 	}, nil
 }
 
-// Search 执行搜索
+// Search 执行搜索（使用 FTS 文本搜索）
 func (m *BuiltinSearchManager) Search(ctx context.Context, query string, opts SearchOptions) ([]*SearchResult, error) {
-	return m.manager.Search(ctx, query, opts)
+	return m.store.SearchByText(query, opts)
 }
 
-// Add 添加记忆
+// Add 添加记忆（直接写入 store，无需 embedding）
 func (m *BuiltinSearchManager) Add(ctx context.Context, text string, source MemorySource, memType MemoryType, metadata MemoryMetadata) error {
-	_, err := m.manager.AddMemory(ctx, text, source, memType, metadata)
-	return err
+	ve := &VectorEmbedding{
+		Text:     text,
+		Source:   source,
+		Type:     memType,
+		Metadata: metadata,
+	}
+	return m.store.Add(ve)
 }
 
 // GetStatus 获取状态
@@ -97,12 +90,9 @@ func (m *BuiltinSearchManager) GetStatus() map[string]interface{} {
 	status["backend"] = "builtin"
 	status["database_path"] = m.dbPath
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if stats, err := m.manager.GetStats(ctx); err == nil {
-		status["total_count"] = stats.TotalCount
-		status["cache_size"] = stats.CacheSize
+	all, err := m.store.List(nil)
+	if err == nil {
+		status["total_count"] = len(all)
 	}
 
 	return status
@@ -110,7 +100,7 @@ func (m *BuiltinSearchManager) GetStatus() map[string]interface{} {
 
 // Close 关闭管理器
 func (m *BuiltinSearchManager) Close() error {
-	return m.manager.Close()
+	return m.store.Close()
 }
 
 // NewQMDSearchManager 创建 QMD 搜索管理器

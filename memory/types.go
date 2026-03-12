@@ -63,6 +63,8 @@ type MemoryMetadata struct {
 	LastAccessed time.Time `json:"last_accessed,omitempty"`
 	// Timestamp is the original timestamp for session/daily memories
 	Timestamp *time.Time `json:"timestamp,omitempty"`
+	// AgentID is the agent that created this memory (for multi-agent isolation)
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 // SearchResult represents a memory search result with relevance score
@@ -103,6 +105,8 @@ type SearchOptions struct {
 	TemporalDecay *TemporalDecayConfig `json:"temporal_decay,omitempty"`
 	// IncludeCitations adds citation strings to results
 	IncludeCitations bool `json:"include_citations,omitempty"`
+	// AgentID filters results by agent ID (empty means all agents)
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 // DefaultSearchOptions returns sensible default search options
@@ -191,6 +195,8 @@ type Store interface {
 	Update(embedding *VectorEmbedding) error
 	// List lists all memories with optional filtering
 	List(filter func(*VectorEmbedding) bool) ([]*VectorEmbedding, error)
+	// SearchByText performs full-text search without requiring vector embeddings
+	SearchByText(query string, opts SearchOptions) ([]*SearchResult, error)
 	// Close closes the store
 	Close() error
 }
