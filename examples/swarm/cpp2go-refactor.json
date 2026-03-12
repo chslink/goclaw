@@ -1,0 +1,85 @@
+{
+  "name": "cpp2go-refactor",
+  "description": "C++ → Go 大型项目重构蜂群团队",
+  "mode": "corporate",
+  "secretary": {
+    "agent_id": "secretary-cpp2go",
+    "model": "opus",
+    "deny_tools": ["browser_navigate"]
+  },
+  "hr": {
+    "agent_id": "hr-cpp2go",
+    "model": "opus",
+    "deny_tools": ["browser_navigate", "run_shell", "web_search"]
+  },
+  "pm": {
+    "agent_id": "pm-cpp2go",
+    "model": "opus",
+    "deny_tools": ["browser_navigate", "web_search"]
+  },
+  "worker_pool": {
+    "max_concurrent": 10,
+    "archive_after_minutes": 60,
+    "default_model": "sonnet",
+    "templates": [
+      {
+        "role": "analyst",
+        "name": "C++源码分析师",
+        "model": "opus",
+        "allow_tools": ["read_file", "list_dir", "run_shell", "memory_search", "agent_call"],
+        "deny_tools": ["write_file", "edit_file", "browser_navigate"]
+      },
+      {
+        "role": "architect",
+        "name": "Go架构设计师",
+        "model": "opus",
+        "allow_tools": ["read_file", "write_file", "list_dir", "web_search", "web_fetch", "memory_search", "agent_call"],
+        "deny_tools": ["run_shell", "browser_navigate"]
+      },
+      {
+        "role": "coder",
+        "name": "Go编码工程师",
+        "model": "sonnet",
+        "allow_tools": ["read_file", "write_file", "edit_file", "list_dir", "run_shell", "memory_search", "agent_call"],
+        "deny_tools": ["web_search", "browser_navigate"]
+      },
+      {
+        "role": "reviewer",
+        "name": "代码审查员",
+        "model": "opus",
+        "allow_tools": ["read_file", "list_dir", "run_shell", "memory_search", "agent_call"],
+        "deny_tools": ["write_file", "edit_file", "browser_navigate"]
+      },
+      {
+        "role": "tester",
+        "name": "测试工程师",
+        "model": "sonnet",
+        "allow_tools": ["read_file", "write_file", "edit_file", "list_dir", "run_shell", "memory_search", "agent_call"],
+        "deny_tools": ["web_search", "browser_navigate"]
+      },
+      {
+        "role": "doc_writer",
+        "name": "文档工程师",
+        "model": "sonnet",
+        "allow_tools": ["read_file", "write_file", "list_dir", "memory_search", "agent_call"],
+        "deny_tools": ["run_shell", "edit_file", "browser_navigate"]
+      },
+      {
+        "role": "researcher",
+        "name": "技术研究员",
+        "model": "opus",
+        "allow_tools": ["web_search", "web_fetch", "read_file", "write_file", "memory_search", "agent_call"],
+        "deny_tools": ["run_shell", "edit_file", "browser_navigate"]
+      }
+    ]
+  },
+  "approval": {
+    "enabled": true,
+    "timeout_minutes": 30,
+    "auto_approve_below": 1
+  },
+  "reporting": {
+    "interval_minutes": 15,
+    "detail_level": "detailed"
+  }
+}

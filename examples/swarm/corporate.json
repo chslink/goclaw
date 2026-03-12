@@ -1,0 +1,45 @@
+{
+  "name": "my-company",
+  "description": "公司化 Agent 蜂群示例",
+  "mode": "corporate",
+  "secretary": {
+    "agent_id": "secretary",
+    "model": "glm-5"
+  },
+  "hr": {
+    "agent_id": "hr",
+    "model": "glm-5",
+    "deny_tools": ["browser_navigate", "run_shell", "web_search"]
+  },
+  "pm": {
+    "agent_id": "pm",
+    "model": "glm-5",
+    "deny_tools": ["browser_navigate", "web_search"]
+  },
+  "worker_pool": {
+    "max_concurrent": 5,
+    "archive_after_minutes": 30,
+    "default_model": "glm-5",
+    "templates": [
+      {
+        "role": "researcher",
+        "name": "研究员",
+        "allow_tools": ["web_search", "web_fetch"]
+      },
+      {
+        "role": "writer",
+        "name": "写手",
+        "allow_tools": ["read_file", "write_file"]
+      }
+    ]
+  },
+  "approval": {
+    "enabled": true,
+    "timeout_minutes": 10,
+    "auto_approve_below": 2
+  },
+  "reporting": {
+    "interval_minutes": 5,
+    "detail_level": "brief"
+  }
+}

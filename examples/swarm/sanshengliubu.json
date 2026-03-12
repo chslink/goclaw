@@ -1,0 +1,28 @@
+{
+  "name": "sanshengliubu",
+  "description": "三省六部协同工作蜂群",
+  "agent_ids": ["taizi", "zhongshu", "menxia", "shangshu"],
+  "flows": [
+    {
+      "name": "draft_edict",
+      "description": "起草诏书流程",
+      "from": "taizi",
+      "to": "zhongshu",
+      "condition": "contains('起草')"
+    },
+    {
+      "name": "review_edict",
+      "description": "审核诏书流程",
+      "from": "zhongshu",
+      "to": "menxia",
+      "condition": "contains('审核')"
+    },
+    {
+      "name": "approve_edict",
+      "description": "批准诏书流程",
+      "from": "menxia",
+      "to": "taizi",
+      "condition": "always"
+    }
+  ]
+}

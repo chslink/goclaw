@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoClaw Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/admin/style.css">
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen" x-data="app()">
+    <div class="flex h-screen overflow-hidden">
+        <!-- 侧边栏 -->
+        <aside class="w-56 bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0">
+            <div class="p-4 border-b border-gray-700">
+                <h1 class="text-lg font-bold text-emerald-400">GoClaw Admin</h1>
+                <p class="text-xs text-gray-500 mt-1">Management Console</p>
+            </div>
+            <nav class="flex-1 py-2 overflow-y-auto">
+                <template x-for="item in navItems" :key="item.id">
+                    <a href="#"
+                       @click.prevent="currentPage = item.id"
+                       :class="currentPage === item.id ? 'bg-gray-700 text-emerald-400 border-r-2 border-emerald-400' : 'text-gray-400 hover:bg-gray-750 hover:text-gray-200'"
+                       class="flex items-center px-4 py-2.5 text-sm transition-colors">
+                        <span class="w-5 mr-3 text-center" x-text="item.icon"></span>
+                        <span x-text="item.label"></span>
+                    </a>
+                </template>
+            </nav>
+            <div class="p-3 border-t border-gray-700 text-xs text-gray-600">
+                v0.1.0
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto">
+            <!-- Dashboard -->
+            <div x-show="currentPage === 'dashboard'" x-data="dashboard()">
+                <div class="p-6">
+                    <h2 class="text-xl font-semibold mb-4">Dashboard</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="text-gray-400 text-sm">Agents</div>
+                            <div class="text-2xl font-bold mt-1" x-text="data.agents ?? '-'"></div>
+                        </div>
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="text-gray-400 text-sm">Sessions</div>
+                            <div class="text-2xl font-bold mt-1" x-text="data.sessions ?? '-'"></div>
+                        </div>
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="text-gray-400 text-sm">Channels</div>
+                            <div class="text-2xl font-bold mt-1" x-text="data.channels?.count ?? '-'"></div>
+                        </div>
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="text-gray-400 text-sm">Cron Jobs</div>
+                            <div class="text-2xl font-bold mt-1" x-text="data.cron ?? '-'"></div>
+                        </div>
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="text-gray-400 text-sm">Swarm</div>
+                            <div class="text-2xl font-bold mt-1" x-text="data.swarm?.active ? (data.swarm?.mode || 'active') : 'inactive'"></div>
+                            <div class="text-xs text-gray-500 mt-1" x-show="data.swarm?.active" x-text="data.swarm?.name || ''"></div>
+                        </div>
+                    </div>
+                    <!-- 系统信息 -->
+                    <div class="bg-gray-800 rounded-lg p-4 border border-gray-700" x-show="data.system">
+                        <h3 class="text-sm font-semibold text-gray-400 mb-3">System</h3>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <div>
+                                <span class="text-gray-500">Uptime:</span>
+                                <span x-text="data.system?.uptime ?? '-'"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Go:</span>
+                                <span x-text="data.system?.go_version ?? '-'"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Goroutines:</span>
+                                <span x-text="data.system?.goroutines ?? '-'"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Memory:</span>
+                                <span x-text="formatBytes(data.system?.memory_alloc)"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">OS:</span>
+                                <span x-text="(data.system?.os ?? '') + '/' + (data.system?.arch ?? '')"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">CPUs:</span>
+                                <span x-text="data.system?.cpus ?? '-'"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Hostname:</span>
+                                <span x-text="data.system?.hostname ?? '-'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config -->
+            <div x-show="currentPage === 'config'" x-data="configEditor()">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold">Configuration</h2>
+                        <div class="flex gap-2">
+                            <button @click="loadConfig()" class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded">Reload</button>
+                            <button @click="saveConfig()" class="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 rounded" x-show="dirty">Save</button>
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-500 mb-2" x-text="'Path: ' + configPath"></div>
+                    <div x-show="error" class="bg-red-900/50 text-red-300 p-3 rounded mb-3 text-sm" x-text="error"></div>
+                    <div x-show="success" class="bg-emerald-900/50 text-emerald-300 p-3 rounded mb-3 text-sm" x-text="success"></div>
+
+                    <!-- Tabs -->
+                    <div class="flex gap-1 mb-4 border-b border-gray-700 pb-2">
+                        <button @click="switchTab('llm')"
+                                :class="tab === 'llm' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">LLM</button>
+                        <button @click="switchTab('channels')"
+                                :class="tab === 'channels' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">Channels</button>
+                        <button @click="switchTab('json')"
+                                :class="tab === 'json' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">JSON</button>
+                    </div>
+
+                    <!-- LLM Tab -->
+                    <div x-show="tab === 'llm'" class="space-y-6 max-h-[calc(100vh-260px)] overflow-y-auto pr-2">
+                        <!-- Agent Defaults -->
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <h3 class="text-sm font-semibold text-gray-400 mb-3">Agent Defaults</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Model</label>
+                                    <input type="text" x-model="agentDefaults.model" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Temperature</label>
+                                    <input type="number" min="0" max="2" step="0.1" x-model="agentDefaults.temperature" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Max Tokens</label>
+                                    <input type="number" x-model="agentDefaults.max_tokens" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Max Iterations</label>
+                                    <input type="number" x-model="agentDefaults.max_iterations" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Max History Messages</label>
+                                    <input type="number" x-model="agentDefaults.max_history_messages" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Decision Agent -->
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="flex items-center justify-between mb-3">
+                                <h3 class="text-sm font-semibold text-gray-400">Decision Agent</h3>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="decisionAgent.enabled" @change="markDirty()" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Provider</label>
+                                    <select x-model="decisionAgent.provider" @change="markDirty()"
+                                            class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                        <option value="">-- select --</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="anthropic">Anthropic</option>
+                                        <option value="openrouter">OpenRouter</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Model</label>
+                                    <input type="text" x-model="decisionAgent.model" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">API Key</label>
+                                    <input type="password" x-model="decisionAgent.api_key" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Base URL</label>
+                                    <input type="text" x-model="decisionAgent.base_url" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Timeout (ms)</label>
+                                    <input type="number" x-model="decisionAgent.timeout_ms" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Max Tokens</label>
+                                    <input type="number" x-model="decisionAgent.max_tokens" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">Temperature</label>
+                                    <input type="number" min="0" max="2" step="0.1" x-model="decisionAgent.temperature" @input="markDirty()"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Providers -->
+                        <template x-for="pname in ['openrouter', 'openai', 'anthropic']" :key="pname">
+                            <div class="bg-gray-800 rounded-lg border border-gray-700">
+                                <button @click="providerOpen[pname] = !providerOpen[pname]"
+                                        class="w-full flex items-center justify-between p-4 text-left">
+                                    <h3 class="text-sm font-semibold text-gray-400 capitalize" x-text="pname"></h3>
+                                    <span class="text-gray-500 text-xs" x-text="providerOpen[pname] ? '▼' : '▶'"></span>
+                                </button>
+                                <div x-show="providerOpen[pname]" class="px-4 pb-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <div>
+                                            <label class="block text-xs text-gray-500 mb-1">API Key</label>
+                                            <input type="password" x-model="providers[pname].api_key" @input="markDirty()"
+                                                   class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-500 mb-1">Base URL</label>
+                                            <input type="text" x-model="providers[pname].base_url" @input="markDirty()"
+                                                   class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-500 mb-1">Timeout</label>
+                                            <input type="number" x-model="providers[pname].timeout" @input="markDirty()"
+                                                   class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Failover -->
+                        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <div class="flex items-center justify-between mb-3">
+                                <h3 class="text-sm font-semibold text-gray-400">Failover</h3>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="failover.enabled" @change="markDirty()" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                </label>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Strategy</label>
+                                <select x-model="failover.strategy" @change="markDirty()"
+                                        class="w-full max-w-xs bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                    <option value="">-- select --</option>
+                                    <option value="round_robin">Round Robin</option>
+                                    <option value="least_used">Least Used</option>
+                                    <option value="random">Random</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Channels Tab -->
+                    <div x-show="tab === 'channels'" class="space-y-3 max-h-[calc(100vh-260px)] overflow-y-auto pr-2">
+                        <template x-for="chname in ['telegram','whatsapp','feishu','qq','wework','dingtalk','infoflow','gotify','weibo']" :key="chname">
+                            <div class="bg-gray-800 rounded-lg border border-gray-700">
+                                <div class="flex items-center justify-between p-4">
+                                    <button @click="channelOpen[chname] = !channelOpen[chname]" class="flex items-center gap-2 text-left flex-1">
+                                        <span class="text-xs text-gray-500" x-text="channelOpen[chname] ? '▼' : '▶'"></span>
+                                        <h3 class="text-sm font-semibold text-gray-300 capitalize" x-text="chname"></h3>
+                                    </button>
+                                    <label class="relative inline-flex items-center cursor-pointer ml-3">
+                                        <input type="checkbox" x-model="channels[chname].enabled" @change="markDirty()" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                    </label>
+                                </div>
+                                <div x-show="channelOpen[chname]" class="px-4 pb-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        <template x-for="field in channelFields(chname)" :key="field.k">
+                                            <div>
+                                                <label class="block text-xs text-gray-500 mb-1" x-text="field.l"></label>
+                                                <input :type="field.t" x-model="channels[chname][field.k]" @input="markDirty()"
+                                                       class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-emerald-500">
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- JSON Tab -->
+                    <div x-show="tab === 'json'">
+                        <textarea
+                            x-model="configText"
+                            @input="dirty = true"
+                            class="w-full h-[calc(100vh-260px)] bg-gray-800 border border-gray-700 rounded p-3 font-mono text-sm text-gray-300 resize-none focus:outline-none focus:border-emerald-500"
+                            spellcheck="false"
+                        ></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agents -->
+            <div x-show="currentPage === 'agents'" x-data="agentList()">
+                <div class="p-6">
+                    <!-- Agent 列表 -->
+                    <div x-show="!selected">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-xl font-semibold">Agents</h2>
+                            <button @click="loadAgents()" class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded">Refresh</button>
+                        </div>
+                        <div x-show="agents.length === 0" class="text-gray-500 text-sm">No agents configured</div>
+                        <div class="grid gap-3">
+                            <template x-for="agent in agents" :key="agent.id">
+                                <div @click="selectAgent(agent)" class="bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-pointer hover:border-emerald-600 transition-colors">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <span class="font-medium" x-text="agent.name || agent.id"></span>
+                                            <span class="text-gray-500 text-sm ml-2" x-text="'#' + agent.id"></span>
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400" x-text="agent.model || 'default'"></span>
+                                            <span class="w-2 h-2 rounded-full"
+                                                  :class="agent.status === 'running' ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Agent 详情 -->
+                    <div x-show="selected">
+                        <!-- 标题栏 -->
+                        <div class="flex items-center gap-3 mb-4">
+                            <button @click="back()" class="text-gray-400 hover:text-white text-sm">&larr; Back</button>
+                            <h2 class="text-xl font-semibold" x-text="selected?.name || selected?.id"></h2>
+                            <span class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400" x-text="selected?.model || 'default'"></span>
+                            <span class="w-2 h-2 rounded-full"
+                                  :class="selected?.status === 'running' ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+                        </div>
+
+                        <!-- Tab 切换 -->
+                        <div class="flex gap-1 mb-4 border-b border-gray-700 pb-2">
+                            <template x-for="t in ['identity', 'memory', 'soul', 'user', 'agents_md']" :key="t">
+                                <button @click="switchTab(t)"
+                                        :class="tab === t ? 'bg-emerald-700 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'"
+                                        class="px-3 py-1.5 text-sm rounded relative">
+                                    <span x-text="tabLabel(t)"></span>
+                                    <span x-show="fileExists(t)" class="ml-1 w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                </button>
+                            </template>
+                        </div>
+
+                        <!-- 文件说明 -->
+                        <div class="text-xs text-gray-500 mb-2" x-text="tabDesc(tab)"></div>
+
+                        <!-- 错误/成功提示 -->
+                        <div x-show="error" class="mb-3 p-2 bg-red-900/30 border border-red-700 rounded text-sm text-red-400" x-text="error"></div>
+                        <div x-show="success" class="mb-3 p-2 bg-emerald-900/30 border border-emerald-700 rounded text-sm text-emerald-400" x-text="success"></div>
+
+                        <!-- 编辑器 -->
+                        <div class="relative">
+                            <textarea x-model="fileContent"
+                                      @input="markDirty()"
+                                      class="w-full h-[calc(100vh-320px)] bg-gray-950 border border-gray-700 rounded-lg p-4 font-mono text-sm text-gray-200 resize-none focus:outline-none focus:border-emerald-600"
+                                      :placeholder="'在此编辑 ' + fileForTab(tab) + ' ...'"></textarea>
+                        </div>
+
+                        <!-- 保存按钮 -->
+                        <div class="flex items-center justify-between mt-3">
+                            <span x-show="dirty" class="text-xs text-yellow-500">* 有未保存的修改</span>
+                            <span x-show="!dirty"></span>
+                            <button @click="saveFile()"
+                                    :disabled="!dirty || saving"
+                                    :class="dirty && !saving ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-gray-700 text-gray-500 cursor-not-allowed'"
+                                    class="px-4 py-2 text-sm rounded transition-colors">
+                                <span x-show="!saving">Save</span>
+                                <span x-show="saving">Saving...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sessions -->
+            <div x-show="currentPage === 'sessions'" x-data="sessionList()">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold">Sessions</h2>
+                        <button @click="loadSessions()" class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded">Refresh</button>
+                    </div>
+                    <div x-show="sessions.length === 0" class="text-gray-500 text-sm">No active sessions</div>
+                    <!-- 会话列表 -->
+                    <div class="space-y-2" x-show="!selectedSession">
+                        <template x-for="sess in sessions" :key="sess.key">
+                            <div @click="viewSession(sess.key)" class="bg-gray-800 rounded-lg p-3 border border-gray-700 cursor-pointer hover:border-gray-600 transition-colors">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-mono truncate max-w-md" x-text="sess.key"></span>
+                                    <div class="flex items-center gap-3 text-xs text-gray-500">
+                                        <span x-text="sess.message_count + ' msgs'"></span>
+                                        <span x-text="formatTime(sess.updated_at)"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <!-- 会话详情 -->
+                    <div x-show="selectedSession">
+                        <div class="flex items-center gap-3 mb-3">
+                            <button @click="selectedSession = null" class="text-gray-400 hover:text-white">&larr; Back</button>
+                            <span class="font-mono text-sm text-gray-400" x-text="selectedSession?.key"></span>
+                            <button @click="clearSession(selectedSession?.key)" class="ml-auto px-3 py-1 text-sm bg-red-700 hover:bg-red-600 rounded">Clear</button>
+                        </div>
+                        <div class="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
+                            <template x-for="(msg, i) in selectedSession?.messages ?? []" :key="i">
+                                <div class="p-3 rounded-lg text-sm"
+                                     :class="msg.role === 'user' ? 'bg-blue-900/30 border border-blue-800/50 ml-12' : msg.role === 'assistant' ? 'bg-gray-800 border border-gray-700 mr-12' : 'bg-gray-800/50 border border-gray-700/50 text-gray-500 text-xs'">
+                                    <div class="text-xs text-gray-500 mb-1" x-text="msg.role"></div>
+                                    <div class="whitespace-pre-wrap" x-text="msg.content"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Logs -->
+            <div x-show="currentPage === 'logs'" x-data="logViewer()">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold">Logs</h2>
+                        <div class="flex items-center gap-2">
+                            <select x-model="levelFilter" @change="reconnect()" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm">
+                                <option value="">All Levels</option>
+                                <option value="debug">Debug</option>
+                                <option value="info">Info</option>
+                                <option value="warn">Warn</option>
+                                <option value="error">Error</option>
+                            </select>
+                            <button @click="logs = []; reconnect()" class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded">Clear</button>
+                            <div class="w-2 h-2 rounded-full" :class="connected ? 'bg-emerald-400' : 'bg-red-400'"></div>
+                        </div>
+                    </div>
+                    <div id="log-container" class="bg-gray-950 rounded-lg border border-gray-700 p-3 h-[calc(100vh-160px)] overflow-y-auto font-mono text-xs leading-relaxed">
+                        <template x-for="(log, i) in logs" :key="i">
+                            <div class="py-0.5 flex gap-2"
+                                 :class="{
+                                     'text-gray-500': log.level === 'debug',
+                                     'text-gray-300': log.level === 'info',
+                                     'text-yellow-400': log.level === 'warn',
+                                     'text-red-400': log.level === 'error'
+                                 }">
+                                <span class="text-gray-600 shrink-0" x-text="formatLogTime(log.time)"></span>
+                                <span class="uppercase w-5 shrink-0 text-center"
+                                      :class="{
+                                          'text-gray-600': log.level === 'debug',
+                                          'text-blue-400': log.level === 'info',
+                                          'text-yellow-400': log.level === 'warn',
+                                          'text-red-400': log.level === 'error'
+                                      }"
+                                      x-text="log.level?.charAt(0)"></span>
+                                <span x-text="log.message" class="break-all"></span>
+                                <span x-show="log.caller" class="text-gray-700 shrink-0" x-text="log.caller"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Swarm -->
+            <div x-show="currentPage === 'swarm'" x-data="swarmManager()">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold">Swarm</h2>
+                    </div>
+                    <!-- Tabs -->
+                    <div class="flex gap-1 mb-4 border-b border-gray-700 pb-2">
+                        <button @click="switchTab('configs')"
+                                :class="tab === 'configs' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">Configs</button>
+                        <button @click="switchTab('active')"
+                                :class="tab === 'active' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">Active</button>
+                        <button @click="switchTab('messages')"
+                                :class="tab === 'messages' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">
+                            Messages
+                            <span x-show="messages.length > 0"
+                                  class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-blue-600 text-white"
+                                  x-text="messages.length"></span>
+                        </button>
+                        <button @click="switchTab('tasks')"
+                                :class="tab === 'tasks' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">Tasks</button>
+                        <button @click="switchTab('approvals')"
+                                :class="tab === 'approvals' ? 'bg-gray-700 text-emerald-400' : 'text-gray-400 hover:text-gray-200'"
+                                class="px-3 py-1.5 text-sm rounded-t">
+                            Approvals
+                            <span x-show="approvals.pending.length > 0"
+                                  class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-red-600 text-white"
+                                  x-text="approvals.pending.length"></span>
+                        </button>
+                    </div>
+
+                    <!-- Configs Tab -->
+                    <div x-show="tab === 'configs'">
+                        <div x-show="configs.length === 0" class="text-gray-500 text-sm">No swarm configs found in ~/.goclaw/swarms/</div>
+                        <div class="grid gap-3">
+                            <template x-for="cfg in configs" :key="cfg.name">
+                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium" x-text="cfg.name"></span>
+                                            <span class="text-xs px-1.5 py-0.5 rounded"
+                                                  :class="cfg.mode === 'corporate' ? 'bg-purple-900/50 text-purple-400' : 'bg-blue-900/50 text-blue-400'"
+                                                  x-text="cfg.mode || 'flat'"></span>
+                                        </div>
+                                        <span x-show="cfg.error" class="text-xs text-red-400" x-text="cfg.error"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500" x-show="cfg.description" x-text="cfg.description"></div>
+                                    <div class="text-xs text-gray-500 mt-1 flex gap-4">
+                                        <span x-show="cfg.agent_count != null" x-text="cfg.agent_count + ' agents'"></span>
+                                        <span x-show="cfg.flow_count != null" x-text="cfg.flow_count + ' flows'"></span>
+                                        <span x-show="cfg.secretary" x-text="'Secretary: ' + cfg.secretary"></span>
+                                        <span x-show="cfg.hr" x-text="'HR: ' + cfg.hr"></span>
+                                        <span x-show="cfg.pm" x-text="'PM: ' + cfg.pm"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Active Tab -->
+                    <div x-show="tab === 'active'">
+                        <div x-show="!active || !active.active" class="text-gray-500 text-sm">No active swarm</div>
+                        <div x-show="active && active.active" class="space-y-4">
+                            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-medium" x-text="active?.name || 'Swarm'"></span>
+                                        <span class="text-xs px-1.5 py-0.5 rounded"
+                                              :class="active?.mode === 'corporate' ? 'bg-purple-900/50 text-purple-400' : 'bg-blue-900/50 text-blue-400'"
+                                              x-text="active?.mode || 'flat'"></span>
+                                        <span class="w-2 h-2 rounded-full"
+                                              :class="active?.running ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                    <div x-show="active?.pending_messages != null">
+                                        <span class="text-gray-500">Pending Messages:</span>
+                                        <span x-text="active?.pending_messages ?? '-'"></span>
+                                    </div>
+                                    <div x-show="active?.tasks_total != null">
+                                        <span class="text-gray-500">Tasks:</span>
+                                        <span x-text="active?.tasks_total ?? '-'"></span>
+                                    </div>
+                                    <div x-show="active?.pending_approvals != null">
+                                        <span class="text-gray-500">Pending Approvals:</span>
+                                        <span x-text="active?.pending_approvals ?? '-'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Agents -->
+                            <div x-show="active?.agents">
+                                <h3 class="text-sm font-semibold text-gray-400 mb-2">Agents</h3>
+                                <div class="flex flex-wrap gap-2">
+                                    <template x-for="ag in (Array.isArray(active?.agents) ? active.agents : Object.keys(active?.agents || {}))" :key="ag">
+                                        <span class="px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded" x-text="ag"></span>
+                                    </template>
+                                </div>
+                            </div>
+                            <!-- Corporate roles -->
+                            <div x-show="active?.mode === 'corporate'" class="grid grid-cols-3 gap-3">
+                                <div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
+                                    <div class="text-xs text-gray-500 mb-1">Secretary</div>
+                                    <div class="text-sm" x-text="active?.secretary || '-'"></div>
+                                </div>
+                                <div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
+                                    <div class="text-xs text-gray-500 mb-1">HR</div>
+                                    <div class="text-sm" x-text="active?.hr || '-'"></div>
+                                </div>
+                                <div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
+                                    <div class="text-xs text-gray-500 mb-1">PM</div>
+                                    <div class="text-sm" x-text="active?.pm || '-'"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Messages Tab -->
+                    <div x-show="tab === 'messages'">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs text-gray-500" x-text="messages.length + ' messages'"></span>
+                            <button @click="loadMessages()" class="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">Refresh</button>
+                        </div>
+                        <div x-show="messages.length === 0" class="text-gray-500 text-sm">No inter-agent messages yet</div>
+                        <div class="space-y-2 max-h-[calc(100vh-220px)] overflow-y-auto" id="messages-container">
+                            <template x-for="(msg, i) in messages" :key="msg.id || i">
+                                <div class="bg-gray-800 rounded-lg p-3 border border-gray-700">
+                                    <div class="flex items-center justify-between mb-1.5">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-semibold px-1.5 py-0.5 rounded"
+                                                  :class="msg.direction === 'request' ? 'bg-blue-900/50 text-blue-400' : 'bg-emerald-900/50 text-emerald-400'"
+                                                  x-text="msg.direction === 'request' ? 'REQ' : 'RESP'"></span>
+                                            <span class="text-sm font-medium text-gray-300" x-text="msg.from"></span>
+                                            <span class="text-gray-600">&rarr;</span>
+                                            <span class="text-sm font-medium text-gray-300" x-text="msg.to"></span>
+                                            <span x-show="msg.flow_name" class="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400" x-text="msg.flow_name"></span>
+                                        </div>
+                                        <span class="text-xs text-gray-600" x-text="formatTime(msg.timestamp)"></span>
+                                    </div>
+                                    <div class="text-sm text-gray-400 whitespace-pre-wrap break-all" x-text="truncateContent(msg.content, 500)"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Tasks Tab -->
+                    <div x-show="tab === 'tasks'">
+                        <div x-show="tasks.length === 0" class="text-gray-500 text-sm">No tasks (corporate mode only)</div>
+                        <div class="space-y-2">
+                            <template x-for="task in tasks" :key="task.id">
+                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-mono text-gray-600" x-text="task.id"></span>
+                                            <span class="font-medium" x-text="task.title"></span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs px-1.5 py-0.5 rounded"
+                                                  :class="taskStatusColor(task.status)"
+                                                  x-text="task.status"></span>
+                                            <span class="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400" x-text="task.priority"></span>
+                                        </div>
+                                    </div>
+                                    <div x-show="task.description" class="text-sm text-gray-400 mb-2" x-text="task.description"></div>
+                                    <div class="text-xs text-gray-500 flex gap-4">
+                                        <span x-show="task.created_by">Created by: <span x-text="task.created_by"></span></span>
+                                        <span x-show="task.assigned_to">Assigned to: <span x-text="task.assigned_to"></span></span>
+                                        <span x-show="task.created_at" x-text="'Created: ' + formatTime(task.created_at)"></span>
+                                    </div>
+                                    <div x-show="task.result" class="mt-2 text-xs text-gray-400 bg-gray-900 rounded p-2">
+                                        Result: <span x-text="task.result"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Approvals Tab -->
+                    <div x-show="tab === 'approvals'">
+                        <!-- Pending -->
+                        <h3 class="text-sm font-semibold text-gray-400 mb-2">Pending</h3>
+                        <div x-show="approvals.pending.length === 0" class="text-gray-500 text-sm mb-4">No pending approvals</div>
+                        <div class="space-y-2 mb-6">
+                            <template x-for="req in approvals.pending" :key="req.id">
+                                <div class="bg-gray-800 rounded-lg p-4 border border-yellow-700/50">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-mono text-gray-600" x-text="req.id"></span>
+                                            <span class="font-medium" x-text="req.title"></span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button @click="approve(req.id)" class="px-2 py-1 text-xs bg-emerald-700 hover:bg-emerald-600 rounded">Approve</button>
+                                            <button @click="reject(req.id)" class="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 rounded">Reject</button>
+                                        </div>
+                                    </div>
+                                    <div x-show="req.description" class="text-sm text-gray-400 mb-1" x-text="req.description"></div>
+                                    <div class="text-xs text-gray-500">
+                                        <span x-show="req.requested_by">By: <span x-text="req.requested_by"></span></span>
+                                        <span x-show="req.task_id" class="ml-3">Task: <span x-text="req.task_id"></span></span>
+                                        <span x-show="req.created_at" class="ml-3" x-text="formatTime(req.created_at)"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <!-- Resolved -->
+                        <h3 class="text-sm font-semibold text-gray-400 mb-2">Resolved</h3>
+                        <div x-show="approvals.resolved.length === 0" class="text-gray-500 text-sm">No resolved approvals</div>
+                        <div class="space-y-2">
+                            <template x-for="req in approvals.resolved" :key="req.id">
+                                <div class="bg-gray-800 rounded-lg p-3 border border-gray-700 opacity-70">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-mono text-gray-600" x-text="req.id"></span>
+                                            <span class="text-sm" x-text="req.title"></span>
+                                        </div>
+                                        <span class="text-xs px-1.5 py-0.5 rounded"
+                                              :class="req.status === 'approved' ? 'bg-emerald-900/50 text-emerald-400' : req.status === 'rejected' ? 'bg-red-900/50 text-red-400' : 'bg-gray-700 text-gray-500'"
+                                              x-text="req.status"></span>
+                                    </div>
+                                    <div x-show="req.reason" class="text-xs text-gray-500 mt-1">Reason: <span x-text="req.reason"></span></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cron -->
+            <div x-show="currentPage === 'cron'" x-data="cronManager()">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold">Cron Jobs</h2>
+                        <button @click="loadJobs()" class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded">Refresh</button>
+                    </div>
+                    <!-- 状态 -->
+                    <div x-show="status" class="text-xs text-gray-500 mb-3">
+                        <span>Service: </span>
+                        <span :class="status?.running ? 'text-emerald-400' : 'text-red-400'" x-text="status?.running ? 'running' : 'stopped'"></span>
+                    </div>
+                    <!-- 任务列表 -->
+                    <div x-show="jobs.length === 0" class="text-gray-500 text-sm">No cron jobs</div>
+                    <div class="space-y-2">
+                        <template x-for="job in jobs" :key="job.id">
+                            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-medium" x-text="job.name"></span>
+                                        <span class="text-xs text-gray-600 font-mono" x-text="job.id"></span>
+                                        <span class="text-xs px-1.5 py-0.5 rounded"
+                                              :class="job.state?.enabled ? 'bg-emerald-900/50 text-emerald-400' : 'bg-gray-700 text-gray-500'"
+                                              x-text="job.state?.enabled ? 'enabled' : 'disabled'"></span>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button @click="runJob(job.id)" class="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-600 rounded">Run</button>
+                                        <button @click="deleteJob(job.id)" class="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 rounded">Delete</button>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-500 grid grid-cols-2 gap-1">
+                                    <div>Schedule: <span x-text="formatSchedule(job.schedule)"></span></div>
+                                    <div>Payload: <span x-text="job.payload?.message?.substring(0, 50) || job.payload?.type || '-'"></span></div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/admin/app.js"></script>
+</body>
+</html>

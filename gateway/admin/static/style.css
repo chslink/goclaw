@@ -1,0 +1,27 @@
+/* GoClaw Admin - 自定义样式（极少，主要用 Tailwind） */
+
+/* 滚动条 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+}
+
+/* 日志自动滚动 */
+#log-container {
+    scroll-behavior: smooth;
+}
+
+/* 侧边栏 hover */
+.hover\:bg-gray-750:hover {
+    background-color: #1f2937cc;
+}
