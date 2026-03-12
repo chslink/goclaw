@@ -251,10 +251,8 @@ func (o *Orchestrator) streamAssistantResponse(ctx context.Context, state *Agent
 	}
 
 	// Check if tools should be disabled based on system prompt content
-	if strings.Contains(systemPromptContent, "没有工具可用") ||
-		strings.Contains(systemPromptContent, "禁止使用任何工具") ||
-		strings.Contains(systemPromptContent, "FORBIDDEN to use any tools") ||
-		strings.Contains(systemPromptContent, "cannot use any tools") {
+	// ContextBuilder.buildIdentityAndTools() 会在工具被禁用时注入 "没有工具可用" 标记
+	if strings.Contains(systemPromptContent, "没有工具可用") {
 		toolDefs = nil
 		logger.Info("Tools disabled based on identity configuration")
 	}
@@ -289,6 +287,7 @@ func (o *Orchestrator) streamAssistantResponse(ctx context.Context, state *Agent
 	logger.Info("=== Calling LLM ===",
 		zap.Int("messages_count", len(fullMessages)),
 		zap.Int("tools_count", len(toolDefs)),
+		zap.Int("available_skills", len(o.config.Skills)),
 		zap.Bool("has_loaded_skills", len(state.LoadedSkills) > 0))
 
 	// Try streaming if provider supports it
@@ -486,7 +485,16 @@ func (o *Orchestrator) executeToolCalls(ctx context.Context, toolCalls []ToolCal
 	results := make([]AgentMessage, 0, len(toolCalls))
 
 	logger.Info("=== Execute Tool Calls Start ===",
-		zap.Int("count", len(toolCalls)))
+		zap.Int("count", len(toolCalls)),
+		zap.Int("available_tools", len(state.Tools)))
+
+	// Log available tool names
+	toolNames := make([]string, 0, len(state.Tools))
+	for _, t := range state.Tools {
+		toolNames = append(toolNames, t.Name())
+	}
+	logger.Info("Available tools", zap.Strings("tools", toolNames))
+
 	for _, tc := range toolCalls {
 		logger.Info("Tool call start",
 			zap.String("tool_id", tc.ID),
@@ -522,6 +530,15 @@ func (o *Orchestrator) executeToolCalls(ctx context.Context, toolCalls []ToolCal
 
 			// Create context with session key for tools to access
 			toolCtx := context.WithValue(ctx, SessionKeyContextKey, state.SessionKey)
+
+			// Add agent_id to context for agent_call tool
+			agentID, _, _ := ParseAgentSessionKey(state.SessionKey)
+			logger.Info("Parsing session key for agent_call",
+				zap.String("session_key", state.SessionKey),
+				zap.String("parsed_agent_id", agentID))
+			if agentID != "" {
+				toolCtx = context.WithValue(toolCtx, "agent_id", agentID)
+			}
 
 			// Add timeout for tool execution (safety net in case tool doesn't handle its own timeout)
 			toolTimeout := o.config.ToolTimeout

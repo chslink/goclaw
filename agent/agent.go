@@ -42,8 +42,10 @@ type NewAgentConfig struct {
 	Context            *ContextBuilder
 	Workspace          string
 	MaxIteration       int
-	MaxHistoryMessages int // 最大历史消息数量
+	MaxHistoryMessages int           // 最大历史消息数量
 	SkillsLoader       *SkillsLoader
+	SessionKey         string        // 会话密钥
+	ToolTimeout        time.Duration // 工具执行超时
 }
 
 // NewAgent creates a new agent
@@ -65,7 +67,11 @@ func NewAgent(cfg *NewAgentConfig) (*Agent, error) {
 	state.SystemPrompt = cfg.Context.BuildSystemPrompt(nil)
 	state.Model = getModelName(cfg.Provider)
 	state.Provider = "provider"
-	state.SessionKey = "main"
+	if cfg.SessionKey != "" {
+		state.SessionKey = cfg.SessionKey
+	} else {
+		state.SessionKey = "main"
+	}
 	state.Tools = ToAgentTools(cfg.Tools.ListExisting())
 	state.LoadedSkills = []string{} // Initialize with empty loaded skills
 
@@ -75,10 +81,14 @@ func NewAgent(cfg *NewAgentConfig) (*Agent, error) {
 		if err := cfg.SkillsLoader.Discover(); err == nil {
 			skills = cfg.SkillsLoader.List()
 			logger.Info("Skills discovered for agent",
-				zap.Int("count", len(skills)))
+				zap.Int("count", len(skills)),
+				zap.String("session_key", state.SessionKey))
 		} else {
 			logger.Warn("Failed to discover skills", zap.Error(err))
 		}
+	} else {
+		logger.Warn("No SkillsLoader configured for agent",
+			zap.String("session_key", state.SessionKey))
 	}
 
 	loopConfig := &LoopConfig{
@@ -86,6 +96,7 @@ func NewAgent(cfg *NewAgentConfig) (*Agent, error) {
 		Provider:         cfg.Provider,
 		SessionMgr:       cfg.SessionMgr,
 		MaxIterations:    cfg.MaxIteration,
+		ToolTimeout:      cfg.ToolTimeout,
 		ConvertToLLM:     defaultConvertToLLM,
 		TransformContext: nil,
 		Skills:           skills,
@@ -543,6 +554,11 @@ func (a *Agent) ReplaceMessages(messages []AgentMessage) {
 // GetOrchestrator 获取 orchestrator（供 AgentManager 使用）
 func (a *Agent) GetOrchestrator() *Orchestrator {
 	return a.orchestrator
+}
+
+// GetWorkspace 返回 agent 的工作区路径
+func (a *Agent) GetWorkspace() string {
+	return a.workspace
 }
 
 // Helper functions

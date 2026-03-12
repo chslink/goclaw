@@ -42,6 +42,8 @@ type AgentManager struct {
 	acpManager     *acp.Manager
 	manualCronMu   sync.Mutex
 	manualCronLast map[string]time.Time
+	// 决策Agent
+	decisionAgent *DecisionAgent
 	// 分身支持
 	subagentRegistry  *SubagentRegistry
 	subagentAnnouncer *SubagentAnnouncer
@@ -137,6 +139,17 @@ func (m *AgentManager) SetupFromConfig(cfg *config.Config, contextBuilder *Conte
 
 	logger.Info("Setting up agents from config")
 
+	// 0a. 初始化 DecisionAgent
+	m.setupDecisionAgent(cfg)
+
+	// 注入 DecisionAgent 到 ContextBuilder
+	if contextBuilder != nil && m.decisionAgent != nil {
+		contextBuilder.SetDecisionAgent(m.decisionAgent)
+	}
+
+	// 0b. 先设置分身支持（注册 agent_call 工具）
+	m.setupSubagentSupport(cfg, contextBuilder)
+
 	// 1. 创建 Agent 实例
 	for _, agentCfg := range cfg.Agents.List {
 		if err := m.createAgent(agentCfg, contextBuilder, cfg); err != nil {
@@ -173,14 +186,37 @@ func (m *AgentManager) SetupFromConfig(cfg *config.Config, contextBuilder *Conte
 		}
 	}
 
-	// 4. 设置分身支持
-	m.setupSubagentSupport(cfg, contextBuilder)
-
 	logger.Info("Agent manager setup complete",
 		zap.Int("agents", len(m.agents)),
 		zap.Int("bindings", len(m.bindings)))
 
 	return nil
+}
+
+// setupDecisionAgent 初始化 DecisionAgent
+func (m *AgentManager) setupDecisionAgent(cfg *config.Config) {
+	dcfg := cfg.Agents.DecisionAgent
+	if dcfg == nil || !dcfg.Enabled {
+		// 未配置或未启用，创建仅 fallback 的 DecisionAgent
+		m.decisionAgent = NewDecisionAgent(nil, nil)
+		logger.Info("DecisionAgent initialized in fallback-only mode")
+		return
+	}
+
+	// 创建独立的 provider
+	provider, err := CreateDecisionAgentProvider(dcfg, cfg)
+	if err != nil {
+		logger.Warn("Failed to create DecisionAgent provider, using fallback-only mode",
+			zap.Error(err))
+		m.decisionAgent = NewDecisionAgent(dcfg, nil)
+		return
+	}
+
+	m.decisionAgent = NewDecisionAgent(dcfg, provider)
+	logger.Info("DecisionAgent initialized with LLM provider",
+		zap.String("provider", dcfg.Provider),
+		zap.String("model", dcfg.Model),
+		zap.Strings("enabled_types", dcfg.EnabledTypes))
 }
 
 // setupSubagentSupport 设置分身支持
@@ -238,6 +274,34 @@ func (m *AgentManager) setupSubagentSupport(cfg *config.Config, contextBuilder *
 	if err := m.tools.RegisterExisting(spawnTool); err != nil {
 		logger.Error("Failed to register sessions_spawn tool", zap.Error(err))
 	}
+
+	// 注册 agent_call 工具
+	agentCallTool := NewAgentCallTool(m.bus)
+	agentCallTool.SetAgentConfigGetter(func(agentID string) *config.AgentConfig {
+		for _, agentCfg := range cfg.Agents.List {
+			if agentCfg.ID == agentID {
+				return &agentCfg
+			}
+		}
+		return nil
+	})
+	agentCallTool.SetAgentIDGetter(func(sessionKey string) string {
+		agentID, _, _ := ParseAgentSessionKey(sessionKey)
+		if agentID == "" {
+			for _, entry := range m.bindings {
+				if entry.Agent != nil {
+					return entry.AgentID
+				}
+			}
+		}
+		return agentID
+	})
+	agentCallTool.SetAgentExistsChecker(func(agentID string) bool {
+		_, exists := m.agents[agentID]
+		return exists
+	})
+
+	m.tools.RegisterAgentTool(agentCallTool)
 
 	logger.Info("Subagent support configured")
 }
@@ -612,7 +676,10 @@ func (m *AgentManager) handleDirectCronOneShot(ctx context.Context, msg *bus.Inb
 	}
 
 	content := strings.TrimSpace(msg.Content)
-	if !isCronOneShotRequest(content) {
+
+	// 使用 DecisionAgent 判断是否为 cron 一次性请求
+	result, _ := m.decisionAgent.Decide(ctx, string(DecisionCronOneShot), content, nil)
+	if !result.Decision {
 		return false, nil
 	}
 
@@ -674,6 +741,9 @@ func (m *AgentManager) allowManualCronRun(jobID string, now time.Time) (bool, in
 	return true, 0
 }
 
+// isCronOneShotRequest 检查文本是否为 cron 一次性执行请求（关键词匹配）。
+// 已被 DecisionAgent 的 fallbackCronOneShot 取代用于 fallback 路径。
+// 保留此函数供现有测试使用。
 func isCronOneShotRequest(text string) bool {
 	if text == "" {
 		return false

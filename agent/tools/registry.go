@@ -97,11 +97,26 @@ func (a *AgentToolAdapter) Description() string {
 }
 
 func (a *AgentToolAdapter) Parameters() map[string]interface{} {
-	return a.tool.Parameters()
+	// Convert map[string]any to map[string]interface{}
+	anyParams := a.tool.Parameters()
+	if anyParams == nil {
+		return nil
+	}
+	ifaceParams := make(map[string]interface{})
+	for k, v := range anyParams {
+		ifaceParams[k] = v
+	}
+	return ifaceParams
 }
 
 func (a *AgentToolAdapter) Execute(ctx context.Context, params map[string]interface{}) (string, error) {
-	result, err := a.tool.Execute(ctx, params, nil)
+	// Convert map[string]interface{} to map[string]any
+	anyParams := make(map[string]any)
+	for k, v := range params {
+		anyParams[k] = v
+	}
+
+	result, err := a.tool.Execute(ctx, anyParams, nil)
 
 	// Convert AgentToolResult to string
 	if err != nil {

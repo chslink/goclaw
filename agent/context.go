@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/smallnest/goclaw/internal/logger"
@@ -24,18 +27,98 @@ const (
 	PromptModeNone    PromptMode = "none"
 )
 
+// bootstrapCacheEntry bootstrap 文件缓存条目
+type bootstrapCacheEntry struct {
+	content string
+	modTime time.Time // 文件的 mtime，作为缓存 key
+}
+
+// identityCacheEntry identity 决策缓存条目
+type identityCacheEntry struct {
+	hasCustomIdentity bool
+	disableTools      bool
+	identityModTime   time.Time // IDENTITY.md 的 mtime
+}
+
 // ContextBuilder 上下文构建器
 type ContextBuilder struct {
-	memory    *MemoryStore
-	workspace string
+	memory        *MemoryStore
+	workspace     string
+	decisionAgent *DecisionAgent
+
+	// bootstrap 文件缓存
+	mu             sync.RWMutex
+	bootstrapCache map[string]*bootstrapCacheEntry
+
+	// identity 决策缓存（避免重复 DecisionAgent LLM 调用）
+	identityCache *identityCacheEntry
 }
 
 // NewContextBuilder 创建上下文构建器
 func NewContextBuilder(memory *MemoryStore, workspace string) *ContextBuilder {
 	return &ContextBuilder{
-		memory:    memory,
-		workspace: workspace,
+		memory:         memory,
+		workspace:      workspace,
+		bootstrapCache: make(map[string]*bootstrapCacheEntry),
 	}
+}
+
+// SetDecisionAgent 注入 DecisionAgent 用于语义决策
+func (b *ContextBuilder) SetDecisionAgent(da *DecisionAgent) {
+	b.decisionAgent = da
+}
+
+// readBootstrapFileCached 带缓存的 bootstrap 文件读取
+// 通过 os.Stat 检查 mtime，mtime 不变则返回缓存内容
+func (b *ContextBuilder) readBootstrapFileCached(filename string) (string, error) {
+	filePath := filepath.Join(b.workspace, filename)
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	b.mu.RLock()
+	cached, ok := b.bootstrapCache[filename]
+	b.mu.RUnlock()
+
+	if ok && cached.modTime.Equal(info.ModTime()) {
+		return cached.content, nil
+	}
+
+	// mtime 变化或首次读取，重新读文件
+	content, err := b.memory.ReadBootstrapFile(filename)
+	if err != nil {
+		return "", err
+	}
+
+	b.mu.Lock()
+	b.bootstrapCache[filename] = &bootstrapCacheEntry{
+		content: content,
+		modTime: info.ModTime(),
+	}
+	b.mu.Unlock()
+
+	return content, nil
+}
+
+// InvalidateCache 清除所有缓存
+func (b *ContextBuilder) InvalidateCache() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.bootstrapCache = make(map[string]*bootstrapCacheEntry)
+	b.identityCache = nil
+}
+
+// getBootstrapModTime 获取 bootstrap 文件的修改时间
+func (b *ContextBuilder) getBootstrapModTime(filename string) time.Time {
+	filePath := filepath.Join(b.workspace, filename)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }
 
 // BuildSystemPrompt 构建系统提示词
@@ -113,6 +196,11 @@ func (b *ContextBuilder) buildSystemPromptWithSkills(skillsContent string, mode 
 		parts = append(parts, "## Workspace Files (injected)\n\n"+bootstrap)
 	}
 
+	// 8.5 记忆上下文（私有层）
+	if memoryCtx, err := b.memory.GetMemoryContext(); err == nil && memoryCtx != "" {
+		parts = append(parts, "## Memory Context\n\n"+memoryCtx)
+	}
+
 	// 9. 消息和回复指导（仅 full 模式）
 	if !isMinimal {
 		parts = append(parts, b.buildMessagingSection())
@@ -143,23 +231,44 @@ func (b *ContextBuilder) buildSystemPromptWithSkills(skillsContent string, mode 
 func (b *ContextBuilder) buildIdentityAndTools() string {
 	now := time.Now()
 
-	// 尝试从 IDENTITY.md 读取自定义身份
-	customIdentity, err := b.memory.ReadBootstrapFile("IDENTITY.md")
+	// 尝试从 IDENTITY.md 读取自定义身份（使用缓存）
+	customIdentity, err := b.readBootstrapFileCached("IDENTITY.md")
 	if err != nil {
 		logger.Debug("Failed to read IDENTITY.md", zap.Error(err))
 	}
-	hasCustomIdentity := customIdentity != "" && !strings.Contains(customIdentity, "选一个你喜欢的") && !strings.Contains(customIdentity, "在第一次对话中填写")
+
+	// 检查 identity 决策缓存
+	var hasCustomIdentity bool
+	var disableTools bool
+
+	identityModTime := b.getBootstrapModTime("IDENTITY.md")
+
+	b.mu.RLock()
+	cached := b.identityCache
+	b.mu.RUnlock()
+
+	if cached != nil && cached.identityModTime.Equal(identityModTime) {
+		// mtime 未变，使用缓存的决策结果
+		hasCustomIdentity = cached.hasCustomIdentity
+		disableTools = cached.disableTools
+	} else {
+		// mtime 变化或首次执行，重新决策
+		hasCustomIdentity = b.checkIdentityValid(customIdentity)
+		disableTools = b.checkToolDisable(customIdentity)
+
+		b.mu.Lock()
+		b.identityCache = &identityCacheEntry{
+			hasCustomIdentity: hasCustomIdentity,
+			disableTools:      disableTools,
+			identityModTime:   identityModTime,
+		}
+		b.mu.Unlock()
+	}
 
 	logger.Debug("buildIdentityAndTools",
 		zap.Bool("has_custom_identity", hasCustomIdentity),
 		zap.Int("identity_length", len(customIdentity)),
 		zap.String("workspace", b.workspace))
-
-	// 检查是否禁止使用工具
-	disableTools := strings.Contains(customIdentity, "禁止使用任何工具") ||
-		strings.Contains(customIdentity, "禁止使用工具") ||
-		strings.Contains(customIdentity, "FORBIDDEN to use any tools") ||
-		strings.Contains(customIdentity, "cannot use any tools")
 
 	// 如果禁止使用工具，只返回身份信息
 	if hasCustomIdentity && disableTools {
@@ -196,6 +305,10 @@ func (b *ContextBuilder) buildIdentityAndTools() string {
 		"message":                "发送消息和频道操作（投票、反应、按钮）",
 		"cron":                   "管理 goclaw 内置的定时任务服务。这是管理定时任务的唯一方式。禁止使用系统 'crontab' 命令。支持：add（创建）、list/ls（查看全部）、rm/remove（删除）、enable、disable、run（立即执行）、status、runs（历史）",
 		"session_status":         "显示会话使用情况/时间/模型状态（用于回答'我们使用的是什么模型？'）",
+		"memory_search":          "搜索语义记忆，查找过去的对话、事实和上下文信息。支持 scope='own'（仅本agent）和 scope='all'（跨agent搜索）",
+		"memory_add":             "添加信息到记忆存储，自动标记当前 agent ID 用于隔离",
+		"memory_read_shared":     "读取蜂群共享目录中的记忆文件（list/read 操作）",
+		"memory_write_shared":    "写入蜂群共享目录（write/append 操作），其他 agent 可通过 memory_read_shared 读取",
 	}
 
 	// 构建工具列表 - 按功能分组
@@ -211,6 +324,8 @@ func (b *ContextBuilder) buildIdentityAndTools() string {
 		"web_search", "web_fetch",
 		// 技能和消息
 		"use_skill", "message", "cron", "session_status",
+		// 记忆工具
+		"memory_search", "memory_add", "memory_read_shared", "memory_write_shared",
 	}
 
 	var toolLines []string
@@ -771,7 +886,7 @@ func (b *ContextBuilder) loadBootstrapFiles() string {
 
 	files := []string{"IDENTITY.md", "AGENTS.md", "SOUL.md", "USER.md"}
 	for _, filename := range files {
-		if content, err := b.memory.ReadBootstrapFile(filename); err == nil && content != "" {
+		if content, err := b.readBootstrapFileCached(filename); err == nil && content != "" {
 			parts = append(parts, fmt.Sprintf("### %s\n\n%s", filename, content))
 		}
 	}
@@ -865,4 +980,37 @@ func joinNonEmpty(parts []string, sep string) string {
 		result += part
 	}
 	return result
+}
+
+// checkIdentityValid 检查自定义身份是否有效 (A4)
+func (b *ContextBuilder) checkIdentityValid(customIdentity string) bool {
+	if customIdentity == "" {
+		return false
+	}
+	if b.decisionAgent != nil {
+		result, err := b.decisionAgent.Decide(context.Background(), string(DecisionIdentityValid), customIdentity, nil)
+		if err == nil {
+			return result.Decision
+		}
+	}
+	// fallback: 原始关键词匹配
+	return !strings.Contains(customIdentity, "选一个你喜欢的") && !strings.Contains(customIdentity, "在第一次对话中填写")
+}
+
+// checkToolDisable 检查是否禁止使用工具 (A3)
+func (b *ContextBuilder) checkToolDisable(customIdentity string) bool {
+	if customIdentity == "" {
+		return false
+	}
+	if b.decisionAgent != nil {
+		result, err := b.decisionAgent.Decide(context.Background(), string(DecisionToolDisable), customIdentity, nil)
+		if err == nil {
+			return result.Decision
+		}
+	}
+	// fallback: 原始关键词匹配
+	return strings.Contains(customIdentity, "禁止使用任何工具") ||
+		strings.Contains(customIdentity, "禁止使用工具") ||
+		strings.Contains(customIdentity, "FORBIDDEN to use any tools") ||
+		strings.Contains(customIdentity, "cannot use any tools")
 }

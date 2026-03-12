@@ -98,6 +98,7 @@ func TestHandleDirectCronOneShotRunsSingleEnabledJob(t *testing.T) {
 		bus:            messageBus,
 		tools:          reg,
 		manualCronLast: make(map[string]time.Time),
+		decisionAgent:  NewDecisionAgent(nil, nil),
 	}
 
 	handled, err := mgr.handleDirectCronOneShot(context.Background(), &bus.InboundMessage{
@@ -147,6 +148,7 @@ func TestHandleDirectCronOneShotDeduplicatesWithinCooldown(t *testing.T) {
 		bus:            messageBus,
 		tools:          reg,
 		manualCronLast: make(map[string]time.Time),
+		decisionAgent:  NewDecisionAgent(nil, nil),
 	}
 
 	msg := &bus.InboundMessage{

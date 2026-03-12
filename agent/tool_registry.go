@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/smallnest/goclaw/agent/tools"
+	"github.com/smallnest/goclaw/internal/logger"
+	"go.uber.org/zap"
 )
 
 // ToolRegistry wraps the existing tools.Registry and provides helper methods
@@ -28,7 +30,12 @@ func (r *ToolRegistry) RegisterExisting(tool tools.Tool) error {
 func (r *ToolRegistry) RegisterAgentTool(tool Tool) {
 	// Adapt agent.Tool to tools.Tool and register into the shared registry.
 	// Ignore duplicate registration errors to keep startup resilient.
-	_ = r.registry.Register(&reverseToolAdapter{tool: tool})
+	err := r.registry.Register(&reverseToolAdapter{tool: tool})
+	if err != nil {
+		logger.Error("Failed to register agent tool", zap.String("tool", tool.Name()), zap.Error(err))
+	} else {
+		logger.Info("Agent tool registered successfully", zap.String("tool", tool.Name()))
+	}
 }
 
 // Unregister removes a tool

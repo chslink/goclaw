@@ -10,13 +10,15 @@ import (
 // MemoryTool memory 搜索工具
 type MemoryTool struct {
 	searchManager memory.MemorySearchManager
+	agentID       string
 	name          string
 }
 
 // NewMemoryTool 创建 memory 搜索工具
-func NewMemoryTool(searchManager memory.MemorySearchManager) *MemoryTool {
+func NewMemoryTool(searchManager memory.MemorySearchManager, agentID string) *MemoryTool {
 	return &MemoryTool{
 		searchManager: searchManager,
+		agentID:       agentID,
 		name:          "memory_search",
 	}
 }
@@ -28,7 +30,7 @@ func (t *MemoryTool) Name() string {
 
 // Description 返回工具描述
 func (t *MemoryTool) Description() string {
-	return "Search semantic memory for relevant information about past conversations, facts, and context."
+	return "Search semantic memory for relevant information about past conversations, facts, and context. Use scope='own' to search only your memories, scope='all' to search across all agents."
 }
 
 // Parameters 返回参数定义
@@ -44,6 +46,12 @@ func (t *MemoryTool) Parameters() map[string]interface{} {
 				"type":        "integer",
 				"description": "Maximum number of results",
 				"default":     6,
+			},
+			"scope": map[string]interface{}{
+				"type":        "string",
+				"description": "Search scope: 'own' (only this agent's memories) or 'all' (all agents)",
+				"enum":        []string{"own", "all"},
+				"default":     "own",
 			},
 		},
 		"required": []string{"query"},
@@ -62,8 +70,20 @@ func (t *MemoryTool) Execute(ctx context.Context, params map[string]interface{})
 		limit = int(l)
 	}
 
+	scope := "own"
+	if s, ok := params["scope"].(string); ok {
+		scope = s
+	}
+
 	opts := memory.DefaultSearchOptions()
 	opts.Limit = limit
+	opts.MinScore = 0.0 // Lower min score for text search
+
+	// Apply agent_id filter based on scope
+	if scope == "own" && t.agentID != "" {
+		opts.AgentID = t.agentID
+	}
+	// scope == "all" → opts.AgentID remains empty, searches all
 
 	results, err := t.searchManager.Search(ctx, query, opts)
 	if err != nil {
@@ -90,6 +110,9 @@ func formatSearchResults(query string, results []*memory.SearchResult) string {
 		if result.Type != "" {
 			output += fmt.Sprintf("    Type: %s\n", result.Type)
 		}
+		if result.Metadata.AgentID != "" {
+			output += fmt.Sprintf("    Agent: %s\n", result.Metadata.AgentID)
+		}
 		if result.Metadata.FilePath != "" {
 			output += fmt.Sprintf("    File: %s", result.Metadata.FilePath)
 			if result.Metadata.LineNumber > 0 {
@@ -113,13 +136,15 @@ func formatSearchResults(query string, results []*memory.SearchResult) string {
 // MemoryAddTool memory 添加工具
 type MemoryAddTool struct {
 	searchManager memory.MemorySearchManager
+	agentID       string
 	name          string
 }
 
 // NewMemoryAddTool 创建 memory 添加工具
-func NewMemoryAddTool(searchManager memory.MemorySearchManager) *MemoryAddTool {
+func NewMemoryAddTool(searchManager memory.MemorySearchManager, agentID string) *MemoryAddTool {
 	return &MemoryAddTool{
 		searchManager: searchManager,
+		agentID:       agentID,
 		name:          "memory_add",
 	}
 }
@@ -131,7 +156,7 @@ func (t *MemoryAddTool) Name() string {
 
 // Description 返回工具描述
 func (t *MemoryAddTool) Description() string {
-	return "Add information to memory for future reference. Only works with builtin backend."
+	return "Add information to memory for future reference. Memories are automatically tagged with your agent ID for isolation."
 }
 
 // Parameters 返回参数定义
@@ -178,11 +203,17 @@ func (t *MemoryAddTool) Execute(ctx context.Context, params map[string]interface
 	source := memory.MemorySource(sourceStr)
 	memType := memory.MemoryType(typeStr)
 
-	metadata := memory.MemoryMetadata{}
+	metadata := memory.MemoryMetadata{
+		AgentID: t.agentID, // Automatically tag with agent ID
+	}
 
 	if err := t.searchManager.Add(ctx, text, source, memType, metadata); err != nil {
 		return "", fmt.Errorf("failed to add memory: %w", err)
 	}
 
-	return "Memory added successfully", nil
+	msg := "Memory added successfully"
+	if t.agentID != "" {
+		msg += fmt.Sprintf(" (agent: %s)", t.agentID)
+	}
+	return msg, nil
 }

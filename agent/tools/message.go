@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/smallnest/goclaw/bus"
+	"github.com/smallnest/goclaw/decision"
 	"github.com/smallnest/goclaw/internal/logger"
 	"go.uber.org/zap"
 )
@@ -16,6 +17,7 @@ type MessageTool struct {
 	bus         *bus.MessageBus
 	currentChan string
 	currentChat string
+	decider     decision.Decider
 }
 
 // NewMessageTool 创建消息工具
@@ -23,6 +25,11 @@ func NewMessageTool(bus *bus.MessageBus) *MessageTool {
 	return &MessageTool{
 		bus: bus,
 	}
+}
+
+// SetDecider 注入 Decider 用于消息过滤决策
+func (t *MessageTool) SetDecider(d decision.Decider) {
+	t.decider = d
 }
 
 // SetCurrent 设置当前通道和聊天
@@ -38,8 +45,8 @@ func (t *MessageTool) SendMessage(ctx context.Context, params map[string]interfa
 		return "", fmt.Errorf("content parameter is required")
 	}
 
-	// 过滤中间态错误和拒绝消息
-	if isFilteredContent(content) {
+	// 过滤中间态错误和拒绝消息（使用 DecisionAgent 或 fallback）
+	if t.shouldFilter(ctx, content) {
 		logger.Warn("Message tool send was filtered out",
 			zap.Int("content_length", len(content)))
 		// 返回成功但不实际发送消息
@@ -76,7 +83,23 @@ func (t *MessageTool) SendMessage(ctx context.Context, params map[string]interfa
 	return fmt.Sprintf("Message sent to %s:%s", channel, chatID), nil
 }
 
-// isFilteredContent 检查内容是否应该被过滤
+// shouldFilter 使用 Decider 判断是否过滤消息
+func (t *MessageTool) shouldFilter(ctx context.Context, content string) bool {
+	if t.decider != nil {
+		result, err := t.decider.Decide(ctx, "message_filter", content, nil)
+		if err == nil {
+			return result.Decision
+		}
+		logger.Warn("Decider failed for message_filter, falling back to isFilteredContent",
+			zap.Error(err))
+	}
+	// 无 decider 或 decider 出错时，使用原始逻辑
+	return isFilteredContent(content)
+}
+
+// isFilteredContent 检查内容是否应该被过滤（关键词匹配 fallback）。
+// 已被 DecisionAgent 的 fallbackMessageFilter 取代。
+// 当无 Decider 注入时仍作为直接 fallback 使用。
 func isFilteredContent(content string) bool {
 	if content == "" {
 		return false

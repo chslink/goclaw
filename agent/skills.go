@@ -17,6 +17,34 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SkillPlatformRequires 技能平台依赖要求
+type SkillPlatformRequires struct {
+	Bins       []string `yaml:"bins"`
+	AnyBins    []string `yaml:"anyBins"`
+	Env        []string `yaml:"env"`
+	Config     []string `yaml:"config"`
+	OS         []string `yaml:"os"`
+	PythonPkgs []string `yaml:"pythonPkgs"` // Python包依赖
+	NodePkgs   []string `yaml:"nodePkgs"`   // Node.js包依赖
+}
+
+// SkillPlatformMetadata 技能平台元数据（openclaw/goclaw 通用）
+type SkillPlatformMetadata struct {
+	Emoji    string                 `yaml:"emoji"`
+	Always   bool                   `yaml:"always"`
+	Requires SkillPlatformRequires  `yaml:"requires"`
+	Install  []SkillInstall         `yaml:"install"`
+}
+
+// isEmpty 检查平台元数据是否为空
+func (m SkillPlatformMetadata) isEmpty() bool {
+	return m.Emoji == "" && !m.Always &&
+		len(m.Requires.Bins) == 0 && len(m.Requires.AnyBins) == 0 &&
+		len(m.Requires.Env) == 0 && len(m.Requires.Config) == 0 &&
+		len(m.Requires.OS) == 0 && len(m.Requires.PythonPkgs) == 0 &&
+		len(m.Requires.NodePkgs) == 0 && len(m.Install) == 0
+}
+
 // Skill 技能定义
 type Skill struct {
 	Name        string `yaml:"name"`
@@ -26,20 +54,8 @@ type Skill struct {
 	Homepage    string `yaml:"homepage"`
 	Always      bool   `yaml:"always"`
 	Metadata    struct {
-		OpenClaw struct {
-			Emoji    string `yaml:"emoji"`
-			Always   bool   `yaml:"always"`
-			Requires struct {
-				Bins       []string `yaml:"bins"`
-				AnyBins    []string `yaml:"anyBins"`
-				Env        []string `yaml:"env"`
-				Config     []string `yaml:"config"`
-				OS         []string `yaml:"os"`
-				PythonPkgs []string `yaml:"pythonPkgs"` // Python包依赖
-				NodePkgs   []string `yaml:"nodePkgs"`   // Node.js包依赖
-			} `yaml:"requires"`
-			Install []SkillInstall `yaml:"install"`
-		} `yaml:"openclaw"`
+		OpenClaw SkillPlatformMetadata `yaml:"openclaw"`
+		GoClaw   SkillPlatformMetadata `yaml:"goclaw"`
 	} `yaml:"metadata"`
 	Requires SkillRequirements `yaml:"requires"` // 兼容旧格式
 	Content  string            `yaml:"-"`        // 技能内容（Markdown）
@@ -60,6 +76,52 @@ type MissingDeps struct {
 type SkillRequirements struct {
 	Bins []string `yaml:"bins"`
 	Env  []string `yaml:"env"`
+}
+
+// mergeGoClawMetadata 将 metadata.goclaw 合并到 metadata.openclaw
+// goclaw key 作为覆盖源：如果 openclaw 为空而 goclaw 有值，则使用 goclaw 的值
+func (s *Skill) mergeGoClawMetadata() {
+	if s.Metadata.GoClaw.isEmpty() {
+		return
+	}
+	// 如果 openclaw 侧完全为空，直接赋值
+	if s.Metadata.OpenClaw.isEmpty() {
+		s.Metadata.OpenClaw = s.Metadata.GoClaw
+		return
+	}
+	// 逐字段合并（openclaw 已有的不覆盖）
+	gc := &s.Metadata.GoClaw
+	oc := &s.Metadata.OpenClaw
+	if oc.Emoji == "" {
+		oc.Emoji = gc.Emoji
+	}
+	if !oc.Always && gc.Always {
+		oc.Always = true
+	}
+	if len(oc.Requires.Bins) == 0 {
+		oc.Requires.Bins = gc.Requires.Bins
+	}
+	if len(oc.Requires.AnyBins) == 0 {
+		oc.Requires.AnyBins = gc.Requires.AnyBins
+	}
+	if len(oc.Requires.Env) == 0 {
+		oc.Requires.Env = gc.Requires.Env
+	}
+	if len(oc.Requires.Config) == 0 {
+		oc.Requires.Config = gc.Requires.Config
+	}
+	if len(oc.Requires.OS) == 0 {
+		oc.Requires.OS = gc.Requires.OS
+	}
+	if len(oc.Requires.PythonPkgs) == 0 {
+		oc.Requires.PythonPkgs = gc.Requires.PythonPkgs
+	}
+	if len(oc.Requires.NodePkgs) == 0 {
+		oc.Requires.NodePkgs = gc.Requires.NodePkgs
+	}
+	if len(oc.Install) == 0 {
+		oc.Install = gc.Install
+	}
 }
 
 // SkillInstall 技能安装配置
@@ -173,6 +235,9 @@ func (l *SkillsLoader) loadSkill(path string) error {
 	if err := l.parseSkillMetadata(string(content), &skill); err != nil {
 		return err
 	}
+
+	// 合并 metadata.goclaw 到 metadata.openclaw（goclaw key 优先）
+	skill.mergeGoClawMetadata()
 
 	// 检查是否存在阻塞式需求（如 OS 不匹配），这类需求会导致跳过技能
 	if !l.checkBlockingRequirements(&skill) {
